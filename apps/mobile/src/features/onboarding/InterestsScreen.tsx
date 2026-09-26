@@ -44,7 +44,7 @@ export function InterestsScreen() {
       <Text className="mt-2 font-display text-2xl text-ink">What are you into?</Text>
       <Body className="mt-1 text-muted">Pick a few, or add your own below.</Body>
 
-      <View className="mt-4 flex-row gap-2">
+      <View className="mt-4 flex-row items-center gap-2">
         <View className="flex-1">
           <Field
             value={query}
@@ -53,7 +53,7 @@ export function InterestsScreen() {
             onSubmitEditing={addCustom}
           />
         </View>
-        <Button label="Add" onPress={addCustom} className="mt-6 px-5" />
+        <Button label="Add" onPress={addCustom} className="px-5" />
       </View>
       <Muted className="mt-1.5">
         Common interests match you with a group faster. Specific ones still save to your profile.

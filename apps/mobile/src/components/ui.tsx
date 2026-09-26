@@ -5,6 +5,8 @@ import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -21,15 +23,24 @@ export function Screen({
   ...props
 }: ScrollViewProps & { children: ReactNode }) {
   return (
-    <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      className="flex-1 bg-paper"
-      contentContainerClassName="gap-4 p-5 pb-12"
-      keyboardShouldPersistTaps="handled"
-      {...props}
+    // CHANGED Sep 26: a bare ScrollView doesn't resize for the keyboard on iOS — on a form long
+    // enough that scroll room runs out (signup's password field, for one), the keyboard just
+    // covers the bottom fields with no way to reveal them. KeyboardAvoidingView fixes it for
+    // every screen built on Screen, not just the one that got reported.
+    <KeyboardAvoidingView
+      className="flex-1"
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      {children}
-    </ScrollView>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        className="flex-1 bg-paper"
+        contentContainerClassName="gap-4 p-5 pb-12"
+        keyboardShouldPersistTaps="handled"
+        {...props}
+      >
+        {children}
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -302,7 +313,12 @@ export function Stepper({
       >
         <Minus size={16} color="#20201C" />
       </Pressable>
-      <Text className="font-body-semibold w-4 text-center text-base text-ink">{value}</Text>
+      <Text
+        numberOfLines={1}
+        className="font-body-semibold min-w-6 text-center text-base text-ink"
+      >
+        {value}
+      </Text>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Increase"
