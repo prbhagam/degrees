@@ -8,6 +8,7 @@ const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 
 const server = spawn(npm, ['run', 'dev', '-w', '@degrees/server'], {
   stdio: ['ignore', 'pipe', 'pipe'],
+  shell: process.platform === 'win32',
 });
 for (const stream of [server.stdout, server.stderr]) {
   createInterface({ input: stream }).on('line', (line) => {
@@ -20,15 +21,31 @@ const mobile = spawn(
   ['run', 'start', '-w', '@degrees/mobile', '--', ...process.argv.slice(2)],
   {
     stdio: 'inherit',
+    shell: process.platform === 'win32',
   },
 );
 
 let shuttingDown = false;
+function killChild(child) {
+  if (!child || !child.pid) return;
+  if (process.platform === 'win32') {
+    try {
+      spawn('taskkill', ['/F', '/T', '/PID', String(child.pid)], {
+        stdio: 'ignore',
+      });
+    } catch {
+      child.kill('SIGTERM');
+    }
+  } else {
+    child.kill('SIGTERM');
+  }
+}
+
 function shutdown(code) {
   if (shuttingDown) return;
   shuttingDown = true;
-  server.kill('SIGTERM');
-  mobile.kill('SIGTERM');
+  killChild(server);
+  killChild(mobile);
   process.exitCode = code;
 }
 
