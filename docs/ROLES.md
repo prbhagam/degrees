@@ -23,7 +23,7 @@ Writes matching logic as a module inside Christian's server. Coordinate on the m
 
 The server everything else depends on, and the deploy pipeline that makes it reachable.
 
-- Provision Vultr; nginx; TLS; `degrees.tech` DNS
+- Deploy to Netlify; TLS; `degrees.tech` DNS
 - API server skeleton, routing, error handling
 - **JWT verification on every request** — derive `userId` from the token, never the body
 - Supabase service-role client; the anon-read / service-write split
@@ -66,7 +66,7 @@ Pitch, polish, rehearsal, and the backup video are **all four**, not a role.
 
 | Hours | Sahith | Christian | Charles | Pranav |
 |---|---|---|---|---|
-| **H0–H2** | Schema + migrations; **seed graph** | Provision Vultr; billing ON; server skeleton | Component kit on the Expo scaffold | Maps grounding spike |
+| **H0–H2** | Schema + migrations; **seed graph** | Setup Netlify deploy; API server skeleton | Component kit on the Expo scaffold | Maps grounding spike |
 | **H2–H6** | pgvector; embed seeded profiles | **Public URL + health check (H4)**; JWT verify | Auth + interests page | QR join + `POST /api/connections` |
 | **H6–H12** | Degree traversal; narrowing query | `embedProfile`; Gemini wrapper | Preferences page | Group view off seed data |
 | **H12–H18** | `formGroups` prompt; **matching returns real groups (H14 GATE)** | `generateActivity` + Maps grounding | Feedback flow | Activity display |

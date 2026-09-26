@@ -97,7 +97,7 @@ Ticketmaster Discovery free tier: 5,000 calls/day, 5 req/sec. Cache responses pe
 | Piece | Where | Notes |
 |---|---|---|
 | iOS app | Expo | Dev: Expo Go on a phone. Testers + demo: EAS Build → TestFlight. `ios/` is generated, never committed. |
-| API server | Vultr VPS | Node + TypeScript behind nginx, TLS via Let's Encrypt |
+| API server | Netlify | Node / Hono API deployed to Netlify Functions / edge |
 | Database | Supabase | Managed Postgres + pgvector + Auth |
 | Domain | `api.degrees.tech` | Free .tech for a year. A bare server IP works in dev only — iOS release builds require HTTPS (App Transport Security). |
 | Email | Resend free tier | Transactional only. **Verification off for the demo** so venue signups aren't blocked. |
