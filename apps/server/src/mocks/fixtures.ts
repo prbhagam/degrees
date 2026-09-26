@@ -135,7 +135,8 @@ export const activityFixture = {
   startsAt: '2026-09-27T23:00:00.000Z',
   source: 'maps',
   sourceUrl: 'https://maps.google.com/?q=The+Painted+Duck+Atlanta',
-  reasoning: 'A casual activity with food nearby gives everyone an easy way to talk.',
+  reasoning:
+    'A casual activity with food nearby gives everyone an easy way to talk.',
 } satisfies Activity;
 
 export const matchFixture = {

@@ -12,9 +12,11 @@ const emptyToUndefined = (value: unknown) => (value === '' ? undefined : value);
 
 const rawSchema = z.object({
   NODE_ENV: z.preprocess(emptyToUndefined, z.string().optional()),
-  PORT: z.preprocess(emptyToUndefined, z.coerce.number().int().positive().optional()),
+  PORT: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().int().positive().optional(),
+  ),
   MOCK_MODE: z.preprocess(emptyToUndefined, z.string().optional()),
-  WEB_ORIGIN: z.preprocess(emptyToUndefined, z.url().optional()),
   SUPABASE_URL: z.preprocess(emptyToUndefined, z.url().optional()),
   SUPABASE_SERVICE_ROLE_KEY: z.preprocess(
     emptyToUndefined,
@@ -40,11 +42,15 @@ if (rawMockMode === undefined) {
 } else if (rawMockMode === 'false' || rawMockMode === '0') {
   mockMode = false;
 } else {
-  throw new Error('Invalid environment: MOCK_MODE must be true, false, 1, or 0.');
+  throw new Error(
+    'Invalid environment: MOCK_MODE must be true, false, 1, or 0.',
+  );
 }
 
 if (parsed.data.NODE_ENV === 'production' && mockMode) {
-  throw new Error('Invalid environment: MOCK_MODE=true is refused in production.');
+  throw new Error(
+    'Invalid environment: MOCK_MODE=true is refused in production.',
+  );
 }
 
 if (!mockMode) {
@@ -64,7 +70,6 @@ export const env = {
   nodeEnv: parsed.data.NODE_ENV ?? 'development',
   port: parsed.data.PORT ?? 8787,
   mockMode,
-  webOrigin: parsed.data.WEB_ORIGIN ?? 'http://localhost:5173',
   supabaseUrl: parsed.data.SUPABASE_URL,
   supabaseServiceRoleKey: parsed.data.SUPABASE_SERVICE_ROLE_KEY,
   geminiApiKey: parsed.data.GEMINI_API_KEY,

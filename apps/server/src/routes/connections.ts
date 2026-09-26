@@ -18,7 +18,10 @@ export const connectionRoutes = new Hono<AppEnv>()
     const edgeKey = [context.get('userId'), request.peerId].sort().join(':');
     const edgeCreated = !mockEdges.has(edgeKey);
     mockEdges.add(edgeKey);
-    const response = { ok: true, edgeCreated } satisfies CreateConnectionResponse;
+    const response = {
+      ok: true,
+      edgeCreated,
+    } satisfies CreateConnectionResponse;
     return context.json(response);
   })
   .get('/graph/me', (context) => {

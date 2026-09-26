@@ -11,7 +11,13 @@ export async function traverse(
 ): Promise<Candidate[]> {
   // TODO(Sahith): recursive CTE over canonical connections, depth-capped at 3.
   return Promise.resolve([
-    { id: '10000000-0000-4000-8000-000000000002', degree: Math.min(1, maxDegrees) },
-    { id: '10000000-0000-4000-8000-000000000004', degree: Math.min(2, maxDegrees) },
+    {
+      id: '10000000-0000-4000-8000-000000000002',
+      degree: Math.min(1, maxDegrees),
+    },
+    {
+      id: '10000000-0000-4000-8000-000000000004',
+      degree: Math.min(2, maxDegrees),
+    },
   ]);
 }

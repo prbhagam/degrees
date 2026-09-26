@@ -7,6 +7,8 @@
 --   * traversal/tag/message/HNSW indexes
 --   * RLS, minimal read policies, and the security-definer membership helper
 --   * messages added to the Supabase Realtime publication
+--   * explicit SELECT grants to authenticated on the client-read tables (Supabase is removing default grants;
+--     without a grant, an RLS policy silently returns no rows)
 -- RLS cannot hide only profiles.bio; shared-group row access exposes the whole profile row. Review at H0.
 
 create extension if not exists vector;
@@ -201,5 +203,16 @@ using (public.is_group_member(group_id));
 create policy "messages_select_member"
 on public.messages for select to authenticated
 using (public.is_group_member(group_id));
+
+-- Client reads (anon/publishable key, signed in). Writes stay service-role only: no insert/update/delete grants.
+grant select on
+  public.profiles,
+  public.profile_tags,
+  public.preferences,
+  public.groups,
+  public.group_members,
+  public.activities,
+  public.messages
+to authenticated;
 
 alter publication supabase_realtime add table public.messages;

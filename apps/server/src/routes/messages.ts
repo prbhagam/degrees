@@ -14,7 +14,11 @@ let nextMessageId = 5000;
 
 function assertKnownGroup(groupId: string): void {
   if (groupId !== DEMO_GROUP_ID) {
-    throw new ApiError(404, 'group_not_found', 'The requested group does not exist.');
+    throw new ApiError(
+      404,
+      'group_not_found',
+      'The requested group does not exist.',
+    );
   }
 }
 

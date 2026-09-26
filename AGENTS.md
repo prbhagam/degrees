@@ -12,6 +12,8 @@ People are **nodes**; an **edge** forms when two people meet in person. The app 
 
 The AI's job is getting people offline, not keeping them scrolling.
 
+**It's an iOS app** built with React Native + Expo (no Swift), backed by a Node API server and Supabase. It was originally specced as a web SPA; that changed on Sep 25. Any doc that still says web is stale.
+
 ---
 
 ## Context files
@@ -25,11 +27,48 @@ The AI's job is getting people offline, not keeping them scrolling.
 | [docs/STACK.md](./docs/STACK.md) | Every library, what's decided vs proposed, gotchas |
 | [docs/ROLES.md](./docs/ROLES.md) | Who owns what, hour-by-hour timeline, checkpoints, risks |
 
+Folder-level `AGENTS.md` files hold the specifics for each area. The more specific file wins:
+
+| Folder | Owner | Read it for |
+|---|---|---|
+| [apps/mobile/](./apps/mobile/AGENTS.md) | Charles + Pranav | Expo app — routing pattern, feature lanes, styling, env, running on iOS |
+| [apps/server/](./apps/server/AGENTS.md) | Christian | Hono API — auth, mock mode, adding routes, error shape |
+| [apps/server/src/ai/](./apps/server/src/ai/AGENTS.md) | Christian | Gemini wrapper and the four AI calls |
+| [apps/server/src/matching/](./apps/server/src/matching/AGENTS.md) | Sahith | The matching pipeline and its fallback |
+| [packages/shared/](./packages/shared/AGENTS.md) | all four | The contract as types + Zod — how to change it safely |
+| [supabase/](./supabase/AGENTS.md) | Sahith | Migrations, RLS, seed |
+
+---
+
+## Repo map
+
+```
+apps/mobile/        Expo (React Native) iOS app — Charles + Pranav
+apps/server/        Node + Hono API server — Christian (matching/ is Sahith's)
+packages/shared/    API contract as TypeScript types + Zod schemas — all four
+supabase/           migrations + seed — Sahith
+docs/               the context files above
+scripts/dev.mjs     one-command dev launcher
+```
+
+## Commands
+
+```bash
+npm install
+npm run dev          # API server on :8787 + Expo dev server (scan the QR code with Expo Go, or press i for the iOS simulator)
+npm run typecheck    # every package
+npm run doctor       # expo-doctor: SDK compatibility + duplicate native deps
+npm run export:ios   # bundle the app for iOS — the no-Xcode compile check
+npm run seed         # Supabase seed (shell until Sahith fills it)
+```
+
+No `.env` is needed to start. The server runs in **mock mode**, accepting any bearer token and serving fixtures, until real keys are set. Each file's first line names its owner, so check it before editing outside your lane.
+
 ---
 
 ## Rules that are easy to get wrong
 
-1. **The server owns every AI call.** No Gemini in the browser. No Gemini in Supabase Edge Functions — Edge Functions are not used in this project at all.
+1. **The server owns every AI call.** No Gemini in the app. No Gemini in Supabase Edge Functions — Edge Functions are not used in this project at all.
 2. **The server owns every write.** The client reads from Supabase with the anon key under RLS; all writes go through the API server with the service role key.
 3. **`userId` comes from the verified JWT**, never from a request body.
 4. **The SDK is `@google/genai`.** `@google/generative-ai` is end-of-life (Nov 30, 2025) and still installs cleanly — check `package.json`.
@@ -38,7 +77,7 @@ The AI's job is getting people offline, not keeping them scrolling.
 7. **Group size is a soft constraint.** Best effort, not a hard filter.
 8. **Money is integer cents.** Never floats.
 9. **No auth shortcuts.** Supabase username + password, no SSO. (An earlier draft proposed skipping auth entirely — that was reversed.)
-10. **Secrets never enter git.** `.env.example` only; real keys live in server env and Netlify secrets.
+10. **Secrets never enter git.** `.env.example` only; real keys live in server env only. `EXPO_PUBLIC_*` values ship inside the app bundle, so only the Supabase publishable (anon) key may go there.
 
 ---
 
@@ -53,6 +92,6 @@ The AI's job is getting people offline, not keeping them scrolling.
 
 ## Status
 
-Pre-build as of Sep 25, 2026. Docs are written; the codebase skeleton is the next step — see [HANDOFF-SKELETON.md](./HANDOFF-SKELETON.md) for that brief.
+**Skeleton built** (Sep 25, 2026). Every contract route returns typed mock data, every feature has a placeholder screen, and the migration holds the full schema. No feature logic exists yet. [HANDOFF-SKELETON.md](./HANDOFF-SKELETON.md) is the original brief, which predates the switch from web to mobile.
 
 **Open questions** are listed at the end of [PRD.md](./PRD.md) — Resend usage, the graph view, and the frequency scheduler.

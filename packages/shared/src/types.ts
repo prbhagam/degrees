@@ -8,7 +8,7 @@ import type {
   sendMessageRequestSchema,
   updatePreferencesRequestSchema,
   updateProfileRequestSchema,
-} from './schemas.js';
+} from './schemas';
 
 export type Frequency = 'daily' | 'weekly' | 'monthly';
 export type ConnectionContext = 'qr' | 'event' | 'group' | 'manual';
@@ -138,6 +138,4 @@ export interface GenerateActivityInput {
   };
 }
 
-export type AnalyzeFeedbackOutput = z.infer<
-  typeof analyzeFeedbackOutputSchema
->;
+export type AnalyzeFeedbackOutput = z.infer<typeof analyzeFeedbackOutputSchema>;

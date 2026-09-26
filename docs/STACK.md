@@ -6,29 +6,33 @@ Items marked **(meeting)** were decided in the Sep 25 architecture meeting. Item
 
 ---
 
-## Frontend
+## Mobile app (iOS first)
+
+> **Changed Sep 25 (Sahith):** Degrees is a **mobile app**, not a web app. The meeting chose React 19 + Vite + React Router + Tailwind + Framer Motion for a web SPA; that is replaced by the React Native / Expo equivalents below. iOS is the target for now; nothing is written in Swift.
 
 | Concern | Choice | Notes |
 |---|---|---|
 | Language | **TypeScript** | **(meeting)** |
-| UI | **React 19** | **(meeting)** |
-| Build | **Vite** | **(meeting)** |
-| Routing | **React Router** | **(meeting)** |
-| Styling | **Tailwind CSS** | **(meeting)** |
-| Animation | **Framer Motion** | **(meeting)** |
+| UI | **React Native 0.86 via Expo SDK 57** | **(changed)** — was React 19 web. React 19.2 underneath. |
+| Build | **Expo** (Metro bundler) | **(changed)** — was Vite. `expo prebuild` generates `ios/` on demand; it is never committed. |
+| Routing | **Expo Router** (file-based, `src/app/`) | **(changed)** — was React Router. Gives deep links for free: `degrees://join/HACKGT`. |
+| Styling | **NativeWind v4** (Tailwind CSS **v3** classes) | **(changed)** — plain Tailwind is web-only. NativeWind v5 (Tailwind v4) is still RC. |
+| Animation | **react-native-reanimated** | **(changed)** — Framer Motion doesn't run on React Native. Moti is an optional Framer-like wrapper. |
 | Server state | TanStack Query | *(proposed)* — fits the thin-client model: server is the source of truth, no optimistic local state |
 | Client state | Zustand | *(proposed)* — ~1KB, just current user + active group |
-| Components | shadcn/ui | *(proposed)* — copy-in, no runtime dep |
+| Components | react-native-reusables | *(proposed)* — the shadcn/ui port for NativeWind. Not initialised; Charles owns it. |
 | Validation | Zod | *(proposed)* — one schema drives both the Gemini `responseSchema` and the form |
-| Icons | lucide-react | *(proposed)* |
+| Icons | lucide-react-native | *(proposed)* |
 | Dates | date-fns | *(proposed)* |
-| QR | `qrcode.react` to display | *(proposed)* — typed room code stays the primary join path; camera scanning is fragile on stage |
+| QR | `react-native-qrcode-svg` to display, `expo-camera` to scan | *(proposed)* — typed room code stays the primary join path; the QR encodes the `degrees://join/<code>` deep link |
+| Session storage | `expo-sqlite` localStorage | Expo's documented Supabase setup; keeps users signed in across launches |
 
 ## Backend
 
 | Concern | Choice | Notes |
 |---|---|---|
 | API server | **Node + TypeScript on Vultr** | **(meeting)** — long-running process, **not** Edge Functions |
+| HTTP framework | Hono (`@hono/node-server`), run with `tsx` | *(skeleton)* — TS-first and tiny; no compile step |
 | Database | **Supabase Postgres** | **(meeting)** |
 | Vectors | **pgvector** | **(meeting)** |
 | Auth | **Supabase Auth, username + password** | **(meeting)** — no SSO, no Sign in with Google |
@@ -56,10 +60,10 @@ Items marked **(meeting)** were decided in the Sep 25 architecture meeting. Item
 
 | Piece | Where |
 |---|---|
-| Frontend | Netlify |
+| iOS app | Expo Go on a phone for dev → EAS Build → TestFlight for testers |
 | API server | Vultr VPS |
 | Database + Auth | Supabase |
-| Domain | `degrees.tech` (free .tech for a year); server IP is a demo fallback |
+| Domain | `api.degrees.tech` for the API (free .tech for a year). A bare server IP only works in dev — see gotchas. |
 
 ---
 
@@ -88,4 +92,8 @@ No test suite, no CI, no error monitoring, no analytics, no SSO. Prettier only, 
 - **Enable Gemini billing before H2.** Free tier is ~5–15 req/min and 1,000–1,500/day — not enough for a live demo plus real testers. Paid also stops your data being used for product improvement.
 - **`@google/genai`**, not the EOL package. Worth checking `package.json` twice.
 - **768-dim embeddings.** The 3072 default cannot be indexed by pgvector.
-- **Service role key and Gemini key never reach the client.** `.env.example` in git; real keys in server env and Netlify secrets only.
+- **Service role key and Gemini key never reach the client.** `.env.example` in git; real keys in server env only. The app bundle holds only `EXPO_PUBLIC_*` values, which are public by design.
+- **Always `npx expo install <pkg>`** in `apps/mobile`, never plain `npm install` — it picks the version that matches Expo SDK 57.
+- **Native builds need Xcode** (`expo run:ios`) or EAS Build in the cloud. Without Xcode, use **Expo Go** on a phone — it works until someone adds a native module Expo Go doesn't bundle.
+- **iOS blocks plain HTTP in release builds** (App Transport Security). Dev in Expo Go is fine; TestFlight and demo builds need the API on HTTPS (`api.degrees.tech` with TLS), not a bare IP.
+- **One React version.** Root `package.json` pins `react` via `overrides`; `npm run doctor` fails if two copies sneak in.

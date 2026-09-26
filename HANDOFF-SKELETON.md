@@ -2,6 +2,8 @@
 
 *Paste this into a fresh chat, or point the session at this file. Repo: `~/Projects/hackgt-26`.*
 
+> **Status: done.** The skeleton is built. One deviation from this brief: the frontend is an **Expo / React Native iOS app in `apps/mobile`**, not the React + Vite web app in `apps/web` described below (changed Sep 25). For the current layout, read [AGENTS.md](./AGENTS.md).
+
 ---
 
 ## Your task

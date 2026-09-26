@@ -1,6 +1,10 @@
 // Owner: Christian (Server & Infra) — see docs/ROLES.md.
 import { Hono } from 'hono';
-import type { Activity, GenerateActivityInput, GroupResponse } from '@degrees/shared';
+import type {
+  Activity,
+  GenerateActivityInput,
+  GroupResponse,
+} from '@degrees/shared';
 import { generateActivity } from '../ai/generateActivity.js';
 import { ApiError } from '../lib/errors.js';
 import type { AppEnv } from '../middleware/auth.js';
@@ -8,7 +12,11 @@ import { DEMO_GROUP_ID, groupFixture, people } from '../mocks/fixtures.js';
 
 function assertKnownGroup(groupId: string): void {
   if (groupId !== DEMO_GROUP_ID) {
-    throw new ApiError(404, 'group_not_found', 'The requested group does not exist.');
+    throw new ApiError(
+      404,
+      'group_not_found',
+      'The requested group does not exist.',
+    );
   }
 }
 
