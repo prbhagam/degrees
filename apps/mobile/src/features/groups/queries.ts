@@ -4,7 +4,7 @@
 // focused (LIVE_POLL_MS); every list also has pull-to-refresh.
 import type { Session } from '@supabase/supabase-js';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { api } from '@/lib/api';
 import { LIVE_POLL_MS } from '@/lib/query';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from '@/lib/supabase';
@@ -41,6 +41,10 @@ export function useMe() {
 // it polls every 2s and also subscribes to `activities` so the 'ready' row lands the moment it's written.
 export function useGroup(id: string | undefined, { live = false }: { live?: boolean } = {}) {
   const queryClient = useQueryClient();
+  // supabase-js caches channels by topic: a second screen calling this hook for the same group would get the
+  // already-subscribed channel back and `.on()` throws ("cannot add postgres_changes callbacks after
+  // subscribe()", Sep 26 testing). One topic per hook instance avoids that.
+  const instance = useRef(Math.random().toString(36).slice(2, 10));
 
   useEffect(() => {
     if (!id || isSupabaseEnvironmentUnset()) return;
@@ -54,7 +58,7 @@ export function useGroup(id: string | undefined, { live = false }: { live?: bool
       await supabase.realtime.setAuth(session.access_token);
       if (cancelled) return;
       const channel = supabase
-        .channel(`group-activity-sub:${id}`)
+        .channel(`group-activity-sub:${id}:${instance.current}`)
         .on(
           'postgres_changes',
           {

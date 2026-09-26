@@ -58,6 +58,8 @@ export function useMessages(groupId: string) {
   const me = useMe();
   const group = useGroup(groupId);
   const [live, setLive] = useState(false);
+  // One channel topic per hook instance — see useGroup in features/groups/queries.ts for why.
+  const instance = useRef(Math.random().toString(36).slice(2, 10));
 
   const messages = useQuery({
     queryKey: queryKeys.messages(groupId),
@@ -91,7 +93,7 @@ export function useMessages(groupId: string) {
         members.current?.find(({ id }) => id === senderId)?.displayName ??
         'Someone';
       const channel = supabase
-        .channel(`group-messages:${groupId}`)
+        .channel(`group-messages:${groupId}:${instance.current}`)
         .on<MessageRow>(
           'postgres_changes',
           {
