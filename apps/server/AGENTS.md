@@ -14,8 +14,12 @@ src/config/env.ts        Zod-validated env; loads the repo-root .env; decides mo
 src/middleware/auth.ts   requireAuth: Bearer token → context.var.userId
 src/db/supabase.ts       getServiceClient(): service-role client. The ONLY write path to the database.
 src/lib/errors.ts        ApiError + validateJson(): every error becomes { error: { code, message } }
+src/lib/graph.ts         exploreFrom(): BFS over connections → each person's degree + path (the `via` field)   (Pranav)
+src/lib/groups.ts        loadGroup() as the viewer sees it, membership checks (404 for non-members), activity I/O (Pranav)
+src/external/            places.ts (Places API New) + ticketmaster.ts (Discovery, cached per area)             (Pranav)
 src/routes/*.ts          one Hono sub-app per contract area (me, profile, preferences, connections + graph,
-                         events, match, groups + activity, messages, feedback)
+                         events, match, groups + activity, messages, feedback). connections, events, groups,
+                         and messages are Pranav's.
 src/ai/                  Gemini wrapper + the four AI calls — see src/ai/AGENTS.md
 src/matching/            Sahith's pipeline — see src/matching/AGENTS.md
 src/mocks/fixtures.ts    the coherent mock world every stub returns (Atlanta, HackGT, demo group)
