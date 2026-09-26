@@ -21,16 +21,16 @@ test('peerAnswers keeps one answer per peer, last one wins', () => {
   assert.deepEqual(
     peerAnswers(
       [
-        { peerId: 'maya', wouldMeetAgain: false },
-        { peerId: 'chris', wouldMeetAgain: true },
-        { peerId: 'maya', wouldMeetAgain: true },
+        { peerId: 'maya', relationship: 'not_for_me' },
+        { peerId: 'chris', relationship: 'great' },
+        { peerId: 'maya', relationship: 'great' },
       ],
       'me',
       members,
     ),
     [
-      { peer_id: 'maya', would_meet_again: true },
-      { peer_id: 'chris', would_meet_again: true },
+      { peer_id: 'maya', relationship: 'great' },
+      { peer_id: 'chris', relationship: 'great' },
     ],
   );
 });
@@ -38,7 +38,7 @@ test('peerAnswers keeps one answer per peer, last one wins', () => {
 test('peerAnswers rejects the author and non-members with a 400', () => {
   for (const peerId of ['me', 'stranger']) {
     assert.throws(
-      () => peerAnswers([{ peerId, wouldMeetAgain: true }], 'me', members),
+      () => peerAnswers([{ peerId, relationship: 'great' }], 'me', members),
       (error: unknown) =>
         error instanceof ApiError && error.status === 400 && error.code === 'invalid_request',
     );

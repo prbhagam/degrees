@@ -8,6 +8,7 @@ import {
 import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from '../lib/errors.js';
+import { profileBasics } from '../lib/graph.js';
 import { formGroups } from '../matching/formGroups.js';
 import { narrow } from '../matching/narrow.js';
 import { traverse } from '../matching/traverse.js';
@@ -195,25 +196,50 @@ export const matchRoutes = new Hono<AppEnv>().post(
     const everyoneElse = new Set(
       others.flatMap((c) => c.interests.map((l) => l.toLowerCase())),
     );
+    const basics = await profileBasics([userId, ...others.map((c) => c.id)]);
+
+    // CHANGED Sep 26: members past 1st degree are redacted — no id, no displayName, bio, or photo.
+    // Matches the same rule applied in lib/groups.ts's loadGroup(): you only see someone's identity
+    // once you've actually met them, not just because they're proposed as a match.
+    const members: MatchRunResponse['members'] = [
+      {
+        id: userId,
+        displayName: requesterName,
+        bio: basics.get(userId)?.bio ?? null,
+        photoUrl: basics.get(userId)?.photoUrl ?? null,
+        degree: 0,
+        sharedInterests: requesterInterests.filter((label) =>
+          everyoneElse.has(label.toLowerCase()),
+        ),
+        revealed: true,
+      },
+      ...others.map((c): MatchRunResponse['members'][number] =>
+        c.degree <= 1
+          ? {
+              id: c.id,
+              displayName: c.displayName,
+              bio: basics.get(c.id)?.bio ?? null,
+              photoUrl: basics.get(c.id)?.photoUrl ?? null,
+              degree: c.degree,
+              sharedInterests: sharedWith(c.interests),
+              revealed: true,
+            }
+          : {
+              id: null,
+              displayName: null,
+              bio: null,
+              photoUrl: null,
+              degree: c.degree,
+              sharedInterests: sharedWith(c.interests),
+              revealed: false,
+            },
+      ),
+    ];
 
     const response = {
       groupId,
-      members: [
-        {
-          id: userId,
-          displayName: requesterName,
-          degree: 0,
-          sharedInterests: requesterInterests.filter((label) =>
-            everyoneElse.has(label.toLowerCase()),
-          ),
-        },
-        ...others.map((c) => ({
-          id: c.id,
-          displayName: c.displayName,
-          degree: c.degree,
-          sharedInterests: sharedWith(c.interests),
-        })),
-      ],
+      members,
+      unrevealedCount: members.filter((member) => !member.revealed).length,
       reasoning: group.reasoning,
     } satisfies MatchRunResponse;
     return context.json(response);

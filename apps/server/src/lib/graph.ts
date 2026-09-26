@@ -98,3 +98,38 @@ export async function displayNames(
     ]),
   );
 }
+
+export interface ProfileBasics {
+  displayName: string;
+  bio: string | null;
+  photoUrl: string | null;
+}
+
+// Like displayNames, but for contexts where the viewer has already met these people in person
+// (event co-attendance, a confirmed group) and the design calls for showing bio + photo too, not
+// just a name.
+export async function profileBasics(
+  ids: Iterable<string>,
+): Promise<Map<string, ProfileBasics>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) {
+    return new Map();
+  }
+  const { data, error } = await getServiceClient()
+    .from('profiles')
+    .select('id, username, display_name, bio, photo_url')
+    .in('id', unique);
+  if (error) {
+    throw new Error(`profiles read failed: ${error.message}`);
+  }
+  return new Map(
+    data.map((row) => [
+      row.id as string,
+      {
+        displayName: (row.display_name as string | null) ?? (row.username as string),
+        bio: (row.bio as string | null) ?? null,
+        photoUrl: (row.photo_url as string | null) ?? null,
+      },
+    ]),
+  );
+}

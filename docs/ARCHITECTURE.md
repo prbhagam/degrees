@@ -103,3 +103,17 @@ Ticketmaster Discovery free tier: 5,000 calls/day, 5 req/sec. Cache responses pe
 | Email | Resend free tier | Transactional only. **Verification off for the demo** so venue signups aren't blocked. |
 
 **A public URL must exist by H4**, serving a health check from the real server. Not H25.
+
+**Known inconsistency, not resolved here:** §1's topology diagram and §7's deployment table name different hosts (Vultr VPS vs. Netlify) for the same API server. Predates the Sep 26 changes below; whoever owns deploy should pick one and fix the other section.
+
+---
+
+## 8. Added Sep 26 — photos, notifications, contact exchange
+
+**Photo storage.** `event_photos` (see [DATA-MODEL.md](./DATA-MODEL.md)) only stores a `storage_path` pointer. The image bytes live in **Supabase Storage**, in a bucket (e.g. `event-photos`) that has to be created and given an access policy through the Supabase dashboard or CLI — this is a manual step, not something any migration does. The client uploads directly to Storage, then posts the resulting path to `POST /api/groups/:id/photos`.
+
+**Notifications** follow the same "reads that bypass the server" pattern as chat: the client reads its own `notifications` rows directly from Supabase (RLS `user_id = auth.uid()`) and subscribes via Realtime (the table is in the `supabase_realtime` publication, like `messages`). The server is the only writer — it inserts a row at each trigger point (a hangout proposed, a message sent, feedback due, a contact-exchange request/accept, a new connection formed). `GET /api/notifications` exists only for mock mode, where there's no real Supabase project to read from directly.
+
+**Contact exchange is server-mediated, full stop.** `contact_exchanges` has RLS enabled but zero client grants — every read and write goes through the API server with the service-role key, because whether a phone number is revealed depends on both sides having accepted, and that must be computed server-side, never trusted from a client-supplied flag.
+
+**Identity redaction is an API-layer concern, not a schema or RLS one.** The matching pipeline (§5) is unchanged — it still reasons over the full graph up to `max_degrees`. What changed is `GET /api/groups/:id` and `POST /api/match/run`: any member with `degree > 1` now has `id`/`displayName` nulled out server-side before the response is built. See [DATA-MODEL.md](./DATA-MODEL.md) and [API-CONTRACTS.md](./API-CONTRACTS.md).

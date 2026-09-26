@@ -3,7 +3,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Stack, useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Text, View } from 'react-native';
-import { Body, Button, Card, Screen } from '@/features/groups/ui';
+import { Body, Button, Card, Screen } from '@/components/ui';
 import { parseScan } from './links';
 
 const FRAME = 260;

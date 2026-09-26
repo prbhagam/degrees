@@ -9,7 +9,7 @@ import {
 } from '@degrees/shared';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from './errors.js';
-import { displayNames, exploreFrom } from './graph.js';
+import { exploreFrom, profileBasics } from './graph.js';
 
 // Georgia Tech campus — used when no member has a location on file.
 const DEFAULT_CENTER = { city: 'Atlanta', lat: 33.7756, lng: -84.3963 };
@@ -111,15 +111,15 @@ export async function loadGroup(
   const ids = rows.map((row) => row.user_id);
   const db = getServiceClient();
 
-  const [groupResult, activityResult, names, tags, { reach }] =
+  const [groupResult, activityResult, basics, tags, { reach }] =
     await Promise.all([
       db
         .from('groups')
-        .select('id, status, reasoning')
+        .select('id, status, reasoning, completed_at')
         .eq('id', groupId)
         .single(),
       db.from('activities').select('*').eq('group_id', groupId).limit(1),
-      displayNames(ids),
+      profileBasics(ids),
       tagsByUser(ids),
       exploreFrom(viewerId, undefined, ids),
     ]);
@@ -130,53 +130,57 @@ export async function loadGroup(
     throw new Error(`activities read failed: ${activityResult.error.message}`);
   }
 
+  const status = (groupResult.data.status as GroupStatus | null) ?? 'proposed';
   const viewerTags = new Set(
     (tags.get(viewerId) ?? []).map((label) => label.toLowerCase()),
   );
+  // CHANGED Sep 26: members past 1st degree are redacted — no id, no displayName, bio, or photo.
+  // The design goal is that you never browse the wider matching pool's identities. But accepting
+  // a proposed group is itself a commitment to meet, so revealed also flips true once the group
+  // leaves 'proposed' — otherwise this and ChatScreen (which needs a real sender name to
+  // coordinate) would contradict each other for the exact people you're actively meeting up with.
   const members: GroupMember[] = rows.map(({ user_id: id, degree }) => {
     const path = reach.get(id);
-    return {
-      id,
-      displayName: names.get(id) ?? 'Someone',
-      // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
-      degree: path?.degree ?? degree ?? 0,
-      sharedInterests:
-        id === viewerId
-          ? []
-          : (tags.get(id) ?? []).filter((label) =>
-              viewerTags.has(label.toLowerCase()),
-            ),
-      ...(path
-        ? {
-            via: path.via.map((viaId) => ({
-              id: viaId,
-              displayName: names.get(viaId) ?? 'a friend',
-            })),
-          }
-        : {}),
-    };
+    // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
+    const resolvedDegree = path?.degree ?? degree ?? 0;
+    const revealed = resolvedDegree <= 1 || status !== 'proposed';
+    const sharedInterests =
+      id === viewerId
+        ? []
+        : (tags.get(id) ?? []).filter((label) => viewerTags.has(label.toLowerCase()));
+    const profile = basics.get(id);
+    return revealed
+      ? {
+          id,
+          displayName: profile?.displayName ?? 'Someone',
+          bio: profile?.bio ?? null,
+          photoUrl: profile?.photoUrl ?? null,
+          degree: resolvedDegree,
+          sharedInterests,
+          revealed: true,
+        }
+      : {
+          id: null,
+          displayName: null,
+          bio: null,
+          photoUrl: null,
+          degree: resolvedDegree,
+          sharedInterests,
+          revealed: false,
+        };
   });
-  // The via names above only cover group members; resolve anyone else on a path.
-  const outsiders = members.flatMap(({ via }) =>
-    (via ?? []).filter(({ id }) => !names.has(id)).map(({ id }) => id),
-  );
-  if (outsiders.length > 0) {
-    const more = await displayNames(outsiders);
-    for (const member of members) {
-      for (const hop of member.via ?? []) {
-        hop.displayName = more.get(hop.id) ?? hop.displayName;
-      }
-    }
-  }
   members.sort((a, b) => a.degree - b.degree);
+  const unrevealedCount = members.filter((member) => !member.revealed).length;
 
   const activityRow = activityResult.data[0] as ActivityRow | undefined;
   return {
     id: groupResult.data.id as string,
-    status: (groupResult.data.status as GroupStatus | null) ?? 'proposed',
+    status,
     reasoning: (groupResult.data.reasoning as string | null) ?? '',
     members,
+    unrevealedCount,
     activity: activityRow ? toActivity(activityRow) : null,
+    completedAt: (groupResult.data.completed_at as string | null) ?? null,
   };
 }
 

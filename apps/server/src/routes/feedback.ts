@@ -3,6 +3,7 @@
 import { Hono } from 'hono';
 import {
   feedbackRequestSchema,
+  type FeedbackRelationship,
   type FeedbackRequest,
   type FeedbackResponse,
 } from '@degrees/shared';
@@ -20,9 +21,9 @@ export function peerAnswers(
   peers: FeedbackRequest['peers'],
   authorId: string,
   groupmateIds: Set<string>,
-): { peer_id: string; would_meet_again: boolean }[] {
-  const answers = new Map<string, boolean>();
-  for (const { peerId, wouldMeetAgain } of peers) {
+): { peer_id: string; relationship: FeedbackRelationship }[] {
+  const answers = new Map<string, FeedbackRelationship>();
+  for (const { peerId, relationship } of peers) {
     if (peerId === authorId || !groupmateIds.has(peerId)) {
       throw new ApiError(
         400,
@@ -30,11 +31,11 @@ export function peerAnswers(
         'peers must be other members of this group.',
       );
     }
-    answers.set(peerId, wouldMeetAgain);
+    answers.set(peerId, relationship);
   }
-  return [...answers].map(([peer_id, would_meet_again]) => ({
+  return [...answers].map(([peer_id, relationship]) => ({
     peer_id,
-    would_meet_again,
+    relationship,
   }));
 }
 
@@ -120,6 +121,7 @@ export const feedbackRoutes = new Hono<AppEnv>().post(
           rating: request.rating,
           free_text: freeText,
           analyzed_tags: analysis ? derivedTags : null,
+          sentiment: analysis?.sentiment ?? null,
         },
         { onConflict: 'group_id,author_id' },
       )

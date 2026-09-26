@@ -23,6 +23,9 @@ export const profileRoutes = new Hono<AppEnv>().put(
           bio: body.bio,
           ai_paragraph: body.aiParagraph,
           city: body.city,
+          phone: body.phone,
+          pronouns: body.pronouns ?? null,
+          photo_url: body.photoUrl ?? null,
         })
         .eq('id', userId);
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Owner: Sahith (Data & Matching) — applies 0001 + 0003–0005 to a throwaway local Postgres and runs matching.sql + privacy.sql.
+# Owner: Sahith (Data & Matching) — applies 0001 + 0003-0006 to a throwaway local Postgres and runs matching.sql + privacy.sql.
 # Never touches the shared Supabase project. Requires Homebrew postgresql + pgvector.
 set -euo pipefail
 
@@ -45,6 +45,7 @@ psql_run -f "$migrations/0001_init.sql"
 psql_run -f "$migrations/0003_matching_functions.sql"
 psql_run -f "$migrations/0004_meet_again_boost.sql"
 psql_run -f "$migrations/0005_profile_location_privacy.sql"
+psql_run -f "$migrations/0006_contact_events_photos_notifications.sql"
 psql_run -f "$here/matching.sql"
 echo "matching.sql: all assertions passed"
 psql_run -f "$here/privacy.sql"

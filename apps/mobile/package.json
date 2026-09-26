@@ -13,6 +13,8 @@
   },
   "dependencies": {
     "@degrees/shared": "*",
+    "@expo-google-fonts/fraunces": "^0.4.1",
+    "@expo-google-fonts/public-sans": "^0.4.2",
     "@supabase/supabase-js": "^2.117.2",
     "@tanstack/react-query": "^5.103.3",
     "date-fns": "^4.4.0",

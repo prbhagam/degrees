@@ -12,6 +12,7 @@ import { groupRoutes } from './routes/groups.js';
 import { matchRoutes } from './routes/match.js';
 import { meRoutes } from './routes/me.js';
 import { messageRoutes } from './routes/messages.js';
+import { notificationRoutes } from './routes/notifications.js';
 import { preferencesRoutes } from './routes/preferences.js';
 import { profileRoutes } from './routes/profile.js';
 
@@ -45,6 +46,7 @@ export function createApp(): Hono<AppEnv> {
   api.route('/', groupRoutes);
   api.route('/', messageRoutes);
   api.route('/', feedbackRoutes);
+  api.route('/', notificationRoutes);
   app.route('/api', api);
 
   app.notFound((context) => {

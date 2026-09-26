@@ -1,8 +1,17 @@
 // Contract made real: both apps import this; changing it is a four-person conversation (docs/API-CONTRACTS.md).
 import { z } from 'zod';
 
-export const tagKindSchema = z.enum(['hobby', 'activity', 'derived']);
-export const frequencySchema = z.enum(['daily', 'weekly', 'monthly']);
+export const tagKindSchema = z.enum(['hobby', 'activity', 'derived', 'avoid']);
+// CHANGED Sep 26: added biweekly + few_times_week — validated onboarding design offered more granularity
+// than daily/weekly/monthly. Still stored-and-shown-in-copy only per PRD §9 — no scheduler.
+export const frequencySchema = z.enum([
+  'daily',
+  'few_times_week',
+  'weekly',
+  'biweekly',
+  'monthly',
+]);
+export const feedbackRelationshipSchema = z.enum(['great', 'fine', 'not_for_me']);
 export const connectionContextSchema = z.enum([
   'qr',
   'event',
@@ -17,6 +26,10 @@ export const updateProfileRequestSchema = z.object({
   bio: z.string(),
   aiParagraph: z.string(),
   city: z.string(),
+  // CHANGED Sep 26: onboarding now collects these at signup / edit-profile.
+  phone: z.string(),
+  pronouns: z.string().optional(),
+  photoUrl: z.url().optional(),
   tags: z.array(
     z.object({
       label: z.string(),
@@ -53,10 +66,12 @@ export const feedbackRequestSchema = z.object({
     z.literal(4),
     z.literal(5),
   ]),
+  // CHANGED Sep 26: wouldMeetAgain (boolean) replaced by a 3-way relationship signal —
+  // richer input for future matching, and the hook for mutual contact exchange.
   peers: z.array(
     z.object({
       peerId: z.string(),
-      wouldMeetAgain: z.boolean(),
+      relationship: feedbackRelationshipSchema,
     }),
   ),
   freeText: z.string().optional(),
@@ -84,3 +99,33 @@ export const analyzeFeedbackOutputSchema = z.object({
   ),
   sentiment: sentimentSchema,
 });
+
+// ---- Added Sep 26: host-created events, contact exchange, photos, notifications ------------
+
+export const createEventRequestSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  scheduledAt: z.iso.datetime().optional(),
+  city: z.string().optional(),
+  groupSizeMin: z.number().int(),
+  groupSizeMax: z.number().int(),
+});
+
+export const exchangeRequestSchema = z.object({
+  peerId: z.uuid(),
+});
+
+// A proposed group ('status: proposed') needs a real way to say no — previously there was none.
+export const respondRequestSchema = z.object({
+  accept: z.boolean(),
+});
+
+export const notificationTypeSchema = z.enum([
+  'hangout_invited',
+  'hangout_forming',
+  'message_received',
+  'feedback_prompt',
+  'exchange_requested',
+  'exchange_accepted',
+  'connection_added',
+]);
