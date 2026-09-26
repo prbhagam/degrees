@@ -39,16 +39,14 @@ function ActionRow({
   );
 }
 
-// Charles's screens plus the new Sep 26 additions, reachable until real nav entry points exist for all of them.
+// CHANGED Sep 26: trimmed to just the onboarding steps, the one thing left with no real entry
+// point outside signing up fresh each time. Login/signup are now reached the real way (AuthGate
+// redirects a signed-out visit automatically; Profile → Log out gets you back there). Edit
+// profile, notifications, and create-event all have real nav entry points elsewhere on this screen.
 const DEV_LINKS: { href: Href; label: string }[] = [
-  { href: '/login', label: 'Log in' },
-  { href: '/signup', label: 'Sign up' },
   { href: '/onboarding/interests', label: 'Onboarding: interests' },
   { href: '/onboarding/about', label: 'Onboarding: about you' },
   { href: '/onboarding/preferences', label: 'Onboarding: preferences' },
-  { href: '/profile/edit', label: 'Edit profile' },
-  { href: '/notifications', label: 'Notifications' },
-  { href: '/create-event', label: 'Host a hangout' },
 ];
 
 export function HomeScreen() {
