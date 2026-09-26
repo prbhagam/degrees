@@ -1,0 +1,280 @@
+// Owner: Pranav (Groups, Activities & Chat) — reads a group as its viewer sees it; used by groups + messages routes.
+import {
+  activitySchema,
+  type Activity,
+  type GenerateActivityInput,
+  type GroupMember,
+  type GroupResponse,
+  type GroupStatus,
+} from '@degrees/shared';
+import { getServiceClient } from '../db/supabase.js';
+import { ApiError } from './errors.js';
+import { displayNames, exploreFrom } from './graph.js';
+
+// Georgia Tech campus — used when no member has a location on file.
+const DEFAULT_CENTER = { city: 'Atlanta', lat: 33.7756, lng: -84.3963 };
+const DEFAULT_MAX_COST_CENTS = 3000;
+const DEFAULT_MAX_TRAVEL_MI = 10;
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const groupNotFound = () =>
+  new ApiError(404, 'group_not_found', 'The requested group does not exist.');
+
+interface MemberRow {
+  user_id: string;
+  degree: number | null;
+}
+
+// Non-members get the same 404 as a missing group, so group ids don't leak.
+export async function memberRows(
+  groupId: string,
+  viewerId: string,
+): Promise<MemberRow[]> {
+  if (!UUID_PATTERN.test(groupId)) {
+    throw groupNotFound();
+  }
+  const { data, error } = await getServiceClient()
+    .from('group_members')
+    .select('user_id, degree')
+    .eq('group_id', groupId);
+  if (error) {
+    throw new Error(`group_members read failed: ${error.message}`);
+  }
+  const rows = data as MemberRow[];
+  if (!rows.some((row) => row.user_id === viewerId)) {
+    throw groupNotFound();
+  }
+  return rows;
+}
+
+async function tagsByUser(ids: string[]): Promise<Map<string, string[]>> {
+  const { data, error } = await getServiceClient()
+    .from('profile_tags')
+    .select('user_id, label')
+    .in('user_id', ids);
+  if (error) {
+    throw new Error(`profile_tags read failed: ${error.message}`);
+  }
+  const tags = new Map<string, string[]>();
+  for (const row of data) {
+    const list = tags.get(row.user_id as string) ?? [];
+    list.push(row.label as string);
+    tags.set(row.user_id as string, list);
+  }
+  return tags;
+}
+
+interface ActivityRow {
+  title: string | null;
+  venue: string | null;
+  address: string | null;
+  lat: number | null;
+  lng: number | null;
+  price_cents: number | null;
+  starts_at: string | null;
+  source: string | null;
+  source_url: string | null;
+  reasoning: string | null;
+}
+
+function toActivity(row: ActivityRow): Activity | null {
+  const parsed = activitySchema.safeParse({
+    title: row.title ?? '',
+    venue: row.venue ?? '',
+    address: row.address ?? '',
+    lat: row.lat,
+    lng: row.lng,
+    priceCents: row.price_cents,
+    // Postgres returns "+00:00" offsets; the contract wants ISO 8601 UTC with Z.
+    startsAt: row.starts_at ? new Date(row.starts_at).toISOString() : null,
+    source: row.source,
+    sourceUrl: row.source_url,
+    reasoning: row.reasoning ?? '',
+  });
+  if (!parsed.success) {
+    console.warn(
+      'Skipping an activity row that does not fit the contract',
+      parsed.error.issues,
+    );
+    return null;
+  }
+  return parsed.data;
+}
+
+export async function loadGroup(
+  groupId: string,
+  viewerId: string,
+): Promise<GroupResponse> {
+  const rows = await memberRows(groupId, viewerId);
+  const ids = rows.map((row) => row.user_id);
+  const db = getServiceClient();
+
+  const [groupResult, activityResult, names, tags, { reach }] =
+    await Promise.all([
+      db
+        .from('groups')
+        .select('id, status, reasoning')
+        .eq('id', groupId)
+        .single(),
+      db.from('activities').select('*').eq('group_id', groupId).limit(1),
+      displayNames(ids),
+      tagsByUser(ids),
+      exploreFrom(viewerId, undefined, ids),
+    ]);
+  if (groupResult.error) {
+    throw new Error(`groups read failed: ${groupResult.error.message}`);
+  }
+  if (activityResult.error) {
+    throw new Error(`activities read failed: ${activityResult.error.message}`);
+  }
+
+  const viewerTags = new Set(
+    (tags.get(viewerId) ?? []).map((label) => label.toLowerCase()),
+  );
+  const members: GroupMember[] = rows.map(({ user_id: id, degree }) => {
+    const path = reach.get(id);
+    return {
+      id,
+      displayName: names.get(id) ?? 'Someone',
+      // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
+      degree: path?.degree ?? degree ?? 0,
+      sharedInterests:
+        id === viewerId
+          ? []
+          : (tags.get(id) ?? []).filter((label) =>
+              viewerTags.has(label.toLowerCase()),
+            ),
+      ...(path
+        ? {
+            via: path.via.map((viaId) => ({
+              id: viaId,
+              displayName: names.get(viaId) ?? 'a friend',
+            })),
+          }
+        : {}),
+    };
+  });
+  // The via names above only cover group members; resolve anyone else on a path.
+  const outsiders = members.flatMap(({ via }) =>
+    (via ?? []).filter(({ id }) => !names.has(id)).map(({ id }) => id),
+  );
+  if (outsiders.length > 0) {
+    const more = await displayNames(outsiders);
+    for (const member of members) {
+      for (const hop of member.via ?? []) {
+        hop.displayName = more.get(hop.id) ?? hop.displayName;
+      }
+    }
+  }
+  members.sort((a, b) => a.degree - b.degree);
+
+  const activityRow = activityResult.data[0] as ActivityRow | undefined;
+  return {
+    id: groupResult.data.id as string,
+    status: (groupResult.data.status as GroupStatus | null) ?? 'proposed',
+    reasoning: (groupResult.data.reasoning as string | null) ?? '',
+    members,
+    activity: activityRow ? toActivity(activityRow) : null,
+  };
+}
+
+// The group's combined constraints: the tightest budget and travel range, centred on the members.
+export async function activityInput(
+  groupId: string,
+  viewerId: string,
+): Promise<GenerateActivityInput> {
+  const ids = (await memberRows(groupId, viewerId)).map((row) => row.user_id);
+  const db = getServiceClient();
+  const [profiles, prefs, tags] = await Promise.all([
+    db
+      .from('profiles')
+      .select('id, username, display_name, city, lat, lng')
+      .in('id', ids),
+    db
+      .from('preferences')
+      .select('cost_max_cents, max_travel_mi')
+      .in('user_id', ids),
+    tagsByUser(ids),
+  ]);
+  if (profiles.error) {
+    throw new Error(`profiles read failed: ${profiles.error.message}`);
+  }
+  if (prefs.error) {
+    throw new Error(`preferences read failed: ${prefs.error.message}`);
+  }
+
+  const located = profiles.data.filter(
+    (row) => typeof row.lat === 'number' && typeof row.lng === 'number',
+  );
+  const average = (values: number[]) =>
+    values.reduce((sum, value) => sum + value, 0) / values.length;
+  const cities = profiles.data
+    .map((row) => row.city as string | null)
+    .filter((city): city is string => Boolean(city));
+  const tightest = (values: (number | null)[], fallback: number) => {
+    const known = values.filter(
+      (value): value is number => typeof value === 'number',
+    );
+    return known.length > 0 ? Math.min(...known) : fallback;
+  };
+
+  return {
+    members: profiles.data.map((row) => ({
+      displayName:
+        (row.display_name as string | null) ?? (row.username as string),
+      interests: tags.get(row.id as string) ?? [],
+    })),
+    constraints: {
+      maxCostCents: tightest(
+        prefs.data.map((row) => row.cost_max_cents as number | null),
+        DEFAULT_MAX_COST_CENTS,
+      ),
+      maxTravelMi: tightest(
+        prefs.data.map((row) => row.max_travel_mi as number | null),
+        DEFAULT_MAX_TRAVEL_MI,
+      ),
+      city: cities[0] ?? DEFAULT_CENTER.city,
+      lat:
+        located.length > 0
+          ? average(located.map((row) => row.lat as number))
+          : DEFAULT_CENTER.lat,
+      lng:
+        located.length > 0
+          ? average(located.map((row) => row.lng as number))
+          : DEFAULT_CENTER.lng,
+    },
+  };
+}
+
+// One plan per group: generating again replaces the previous one.
+export async function saveActivity(
+  groupId: string,
+  activity: Activity,
+): Promise<void> {
+  const db = getServiceClient();
+  const { error: deleteError } = await db
+    .from('activities')
+    .delete()
+    .eq('group_id', groupId);
+  if (deleteError) {
+    throw new Error(`activities delete failed: ${deleteError.message}`);
+  }
+  const { error } = await db.from('activities').insert({
+    group_id: groupId,
+    title: activity.title,
+    venue: activity.venue,
+    address: activity.address,
+    lat: activity.lat,
+    lng: activity.lng,
+    price_cents: activity.priceCents,
+    starts_at: activity.startsAt,
+    source: activity.source,
+    source_url: activity.sourceUrl,
+    reasoning: activity.reasoning,
+  });
+  if (error) {
+    throw new Error(`activities insert failed: ${error.message}`);
+  }
+}

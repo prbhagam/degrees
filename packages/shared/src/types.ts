@@ -61,6 +61,9 @@ export interface GroupMember {
   displayName: string;
   degree: number;
   sharedInterests: string[];
+  // The people between the viewer and this member, nearest the viewer first ("you → Maya → Jordan" has
+  // via [Maya]). Empty for the viewer and direct connections; absent when the server couldn't compute it.
+  via?: { id: string; displayName: string }[];
 }
 
 export interface MatchRunResponse {
@@ -75,7 +78,6 @@ export interface GroupResponse {
   id: string;
   status: GroupStatus;
   reasoning: string;
-  // CONTRACT GAP: assumed the underspecified members array reuses GroupMember; confirm at H0.
   members: GroupMember[];
   activity: Activity | null;
 }

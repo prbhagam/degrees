@@ -42,11 +42,19 @@ POST /api/events/:roomCode/join
 // ---- Matching -------------------------------------------------------------
 POST /api/match/run
   → { groupId: string,
-      members: { id, displayName, degree: number, sharedInterests: string[] }[],
+      members: GroupMember[],
       reasoning: string }          // Gemini's explanation, shown in the UI
 
 GET  /api/groups/:id
-  → { id, status, reasoning, members: [...], activity: Activity | null }
+  → { id, status, reasoning, members: GroupMember[], activity: Activity | null }
+  // degree, sharedInterests, and via are relative to the viewer (the JWT user)
+
+type GroupMember = {
+  id: string; displayName: string;
+  degree: number;                  // 0 = you, 1 = met in person, 2 = mutual, 3 = network
+  sharedInterests: string[];
+  via?: { id, displayName }[];     // the degrees path: people between you and them, nearest you first.
+}                                  // [] for you and 1st degree; absent if not computed. Added Sep 26.
 
 // ---- Activity -------------------------------------------------------------
 POST /api/groups/:id/activity
