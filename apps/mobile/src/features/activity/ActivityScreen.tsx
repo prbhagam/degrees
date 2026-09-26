@@ -143,13 +143,23 @@ export function ActivityScreen() {
       queryClient.setQueryData(
         queryKeys.group(id),
         (previous: typeof group.data) =>
-          previous ? { ...previous, activity } : previous,
+          previous
+            ? {
+                ...previous,
+                activity,
+                activityStatus: activity.status ?? 'generating',
+              }
+            : previous,
       );
       void queryClient.invalidateQueries({ queryKey: queryKeys.group(id) });
     },
   });
 
   const activity = group.data?.activity ?? null;
+  const isGenerating =
+    generate.isPending ||
+    activity?.status === 'generating' ||
+    group.data?.activityStatus === 'generating';
 
   return (
     <Screen>
@@ -162,14 +172,25 @@ export function ActivityScreen() {
         />
       ) : null}
 
-      {generate.isPending ? (
-        <LoadingState label="Finding a real place that fits everyone…" />
+      {isGenerating ? (
+        <Card className="items-center gap-3 border-sage/40 bg-paper-raised py-8">
+          <View className="h-14 w-14 items-center justify-center rounded-full bg-sage/20">
+            <Sparkles size={28} color="#5B7A6B" />
+          </View>
+          <Heading>Finding the best spot…</Heading>
+          <Body className="text-center">
+            Degrees AI is curating a real hangout plan with Google Maps based on
+            group interests, location, and budgets.
+          </Body>
+          <LoadingState label="Generating your plan…" />
+        </Card>
       ) : null}
+
       {generate.isError ? (
         <ErrorState message={generate.error.message} />
       ) : null}
 
-      {group.data && !activity && !generate.isPending ? (
+      {group.data && !activity && !isGenerating ? (
         <Card className="items-center py-8">
           <Sparkles size={28} color="#5B7A6B" />
           <Body className="text-center">
@@ -180,7 +201,7 @@ export function ActivityScreen() {
         </Card>
       ) : null}
 
-      {activity && !generate.isPending ? (
+      {activity && !isGenerating ? (
         <>
           <ActivityDetails activity={activity} />
           <Button

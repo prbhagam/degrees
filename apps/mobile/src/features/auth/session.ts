@@ -22,7 +22,8 @@ const AUTH_SCREENS = new Set(['login', 'signup']);
 export function consumePendingHref(): Href {
   const { pendingHref, setPendingHref } = useSessionStore.getState();
   setPendingHref(null);
-  return pendingHref ?? '/';
+  // '/index' (not '/'): Christian's convention from PR #22 for the tabs home route.
+  return pendingHref ?? '/index';
 }
 
 // Added Sep 26 (wave 2): entering the app proper from login/signup/onboarding. Those screens are pushed on top of

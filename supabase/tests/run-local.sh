@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Owner: Sahith (Data & Matching) — applies 0001 + 0003-0007 to a throwaway local Postgres and runs matching.sql + privacy.sql.
+# Owner: Sahith (Data & Matching) — applies 0001 + 0003-0008 to a throwaway local Postgres and runs matching.sql + privacy.sql.
 # Never touches the shared Supabase project. Requires Homebrew postgresql + pgvector.
 set -euo pipefail
 
@@ -64,6 +64,7 @@ create function storage.foldername(name text) returns text[] language sql immuta
 grant usage on schema storage to anon, authenticated, service_role;
 SQL
 psql_run -f "$migrations/0007_meetups_icebreakers_storage.sql"
+psql_run -f "$migrations/0008_activity_status_and_realtime.sql"
 psql_run -f "$here/matching.sql"
 echo "matching.sql: all assertions passed"
 psql_run -f "$here/privacy.sql"

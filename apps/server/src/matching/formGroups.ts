@@ -7,11 +7,10 @@ import { env } from '../config/env.js';
 
 // Group size is soft, but never let a model response balloon a group past this.
 export const ABSOLUTE_MAX_GROUP = 8;
-// Flash first for the better reasoning, then Lite, inside the old 8s budget so match/run still answers within
-// Netlify's ~10s. On Sep 26 Flash mostly 503'd or ran past 8s while Lite answered in ~1s.
+// Lite first (~1s response) to avoid Netlify function timeouts, then Flash with fallback to deterministic score.
 const ATTEMPTS = [
-  { model: FLASH_MODEL, timeoutMs: 4500 },
-  { model: FLASH_LITE_MODEL, timeoutMs: 3000 },
+  { model: FLASH_LITE_MODEL, timeoutMs: 2500 },
+  { model: FLASH_MODEL, timeoutMs: 3000 },
 ] as const;
 
 export interface FormGroupsOptions {

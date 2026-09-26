@@ -2,6 +2,7 @@
 import {
   activitySchema,
   type Activity,
+  type ActivityStatus,
   type GenerateActivityInput,
   type GenerateIcebreakersInput,
   type GroupMember,
@@ -211,6 +212,7 @@ interface ActivityRow {
   source: string | null;
   source_url: string | null;
   reasoning: string | null;
+  status?: string | null;
 }
 
 function toActivity(row: ActivityRow): Activity | null {
@@ -226,6 +228,7 @@ function toActivity(row: ActivityRow): Activity | null {
     source: row.source,
     sourceUrl: row.source_url,
     reasoning: row.reasoning ?? '',
+    status: (row.status as ActivityStatus) ?? 'ready',
   });
   if (!parsed.success) {
     console.warn(
@@ -320,13 +323,18 @@ export async function loadGroup(
 
   const activityRow = activityResult.data[0] as ActivityRow | undefined;
   const codeOpen = meetup ? isCodeOpen(meetup) : false;
+  // Christian (PR #22): a row with status 'generating' is the placeholder written by POST /activity while the
+  // background function works; the client polls/subscribes until it flips to 'ready'.
+  const activityStatus = (activityRow?.status as ActivityStatus | null) ?? (activityRow ? 'ready' : null);
+  const activity = activityRow ? toActivity(activityRow) : null;
   return {
     id: groupResult.data.id as string,
     status,
     reasoning: (groupResult.data.reasoning as string | null) ?? '',
     members,
     unrevealedCount,
-    activity: activityRow ? toActivity(activityRow) : null,
+    activity,
+    activityStatus,
     completedAt: iso(groupResult.data.completed_at as string | null),
     kind,
     name: (groupResult.data.name as string | null) ?? meetup?.name ?? null,
@@ -439,6 +447,7 @@ export async function activityInput(
 export async function saveActivity(
   groupId: string,
   activity: Activity,
+  status: ActivityStatus = 'ready',
 ): Promise<void> {
   const db = getServiceClient();
   const { error: deleteError } = await db
@@ -460,8 +469,29 @@ export async function saveActivity(
     source: activity.source,
     source_url: activity.sourceUrl,
     reasoning: activity.reasoning,
+    status,
   });
   if (error) {
     throw new Error(`activities insert failed: ${error.message}`);
   }
+}
+
+// Christian (PR #22): the placeholder row POST /activity writes before handing off to the background function.
+// Coordinates default to campus so the row still satisfies the Activity contract.
+export async function setActivityGenerating(groupId: string): Promise<Activity> {
+  const placeholder: Activity = {
+    title: 'Curating hangout plan...',
+    venue: 'Degrees AI',
+    address: 'Finding a venue near everyone...',
+    lat: 33.7756,
+    lng: -84.3963,
+    priceCents: null,
+    startsAt: null,
+    source: 'maps',
+    sourceUrl: null,
+    reasoning: 'Degrees AI is currently selecting a venue with Google Maps & Gemini that fits the group.',
+    status: 'generating',
+  };
+  await saveActivity(groupId, placeholder, 'generating');
+  return placeholder;
 }

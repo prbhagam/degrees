@@ -287,6 +287,7 @@ export const groupFixture = {
   ],
   unrevealedCount: 0,
   activity: activityFixture,
+  activityStatus: 'ready',
   completedAt: null,
   kind: 'matched',
   name: null,

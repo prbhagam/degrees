@@ -4,7 +4,8 @@ Every Gemini call in the project lives here. Nothing else, anywhere, calls a mod
 
 | File | Contract | Model | Status |
 |---|---|---|---|
-| `client.ts` | `getAiClient()`, model constants | — | Real: lazily builds `GoogleGenAI` from `GEMINI_API_KEY` |
+| `client.ts` | `getAiClient()`, model constants | — | Real: lazily builds `GoogleGenAI` from `GEMINI_API_KEY`, wrapped with `aiRateLimiter` |
+| `rateLimiter.ts` | `AiRateLimiter` | — | Sliding-window limiter enforcing `GEMINI_RPM` (default 15) across all AI calls |
 | `embedProfile.ts` | `embedProfile(userId): Promise<void>` | `gemini-embedding-001` @ 768 | Real: tags + bio + AI paragraph → `profile_embeddings`; logs and continues on failure (`embedProfileStrict` throws, for the seed) |
 | `generateActivity.ts` | `generateActivity(input): Promise<Activity>` | Flash + **Maps grounding** | Real (Pranav): grounded venue → Places (New) for coordinates/address/price → Ticketmaster fallback → fixture, all inside a 9s budget for Netlify |
 | `analyzeFeedback.ts` | `analyzeFeedback(freeText): Promise<{ tags, sentiment }>` | Lite, then Flash | Real: Lite first (~0.75s vs Flash's 3–5s/503s on Sep 26), 3s timeout each; labels lowercased, deduped, max 5. Real mode never returns the fixture — on failure it returns no tags, since tags are written into the author's profile |

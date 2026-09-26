@@ -165,6 +165,7 @@ export interface MatchRunResponse {
 }
 
 export type Activity = z.infer<typeof activitySchema>;
+export type ActivityStatus = 'generating' | 'ready' | 'failed';
 
 export interface GroupResponse {
   id: string;
@@ -173,6 +174,8 @@ export interface GroupResponse {
   members: GroupMember[];
   unrevealedCount: number;
   activity: Activity | null;
+  // Christian (PR #22): 'generating' while the background plan runs; null when there's no activity row.
+  activityStatus: ActivityStatus | null;
   // Set once the host (or any member) marks the hangout done. Chat and photos go read-only
   // 24h after this timestamp — see CreateEvent/Group screens.
   completedAt: string | null;

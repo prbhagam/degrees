@@ -31,6 +31,7 @@ import {
   memberRows,
   saveActivity,
   saveIcebreakers,
+  setActivityGenerating,
 } from '../lib/groups.js';
 import { log, timed } from '../lib/log.js';
 import type { AppEnv } from '../middleware/auth.js';
@@ -133,6 +134,7 @@ export const groupRoutes = new Hono<AppEnv>()
         ...groupFixture,
         status: mockStatus,
         activity: mockActivity,
+        activityStatus: mockActivity ? 'ready' : null,
         completedAt: mockCompletedAt,
         icebreakers: mockIcebreakers,
       } satisfies GroupResponse;
@@ -224,16 +226,46 @@ export const groupRoutes = new Hono<AppEnv>()
   })
   .post('/groups/:id/activity', async (context) => {
     const groupId = context.req.param('id');
+    const userId = context.get('userId');
     if (env.mockMode) {
       assertMockGroup(groupId);
       mockActivity = await generateActivity(mockActivityInput);
       const response: Activity = mockActivity;
       return context.json(response);
     }
-    const input = await activityInput(groupId, context.get('userId'));
-    const response: Activity = await generateActivity(input);
-    await saveActivity(groupId, response);
-    return context.json(response);
+    // Christian (PR #22): answer in <100ms with a 'generating' placeholder, then generate off the request path —
+    // a Netlify Background Function in production (up to 15 min), an un-awaited task in local dev. The app
+    // subscribes to `activities` and polls every 2s until the row flips to 'ready' (features/groups/queries.ts).
+    await memberRows(groupId, userId);
+    const placeholder = await setActivityGenerating(groupId);
+
+    const isNetlify = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    if (isNetlify) {
+      const netlifyUrl = process.env.URL || 'https://degrees-api.netlify.app';
+      fetch(`${netlifyUrl}/.netlify/functions/activity-background`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId, userId }),
+      })
+        .then((response) => {
+          log.info('activity.background.invoked', { groupId, userId, status: response.status });
+        })
+        .catch((error: unknown) => {
+          log.error('activity.background.invoke_failed', error, { groupId, userId });
+        });
+    } else {
+      void (async () => {
+        try {
+          const input = await activityInput(groupId, userId);
+          const activity = await timed('ai.activity', { groupId }, () => generateActivity(input));
+          await saveActivity(groupId, activity, 'ready');
+        } catch (error) {
+          log.error('activity.background.local_failed', error, { groupId, userId });
+        }
+      })();
+    }
+
+    return context.json(placeholder);
   })
   .post('/groups/:id/complete', async (context) => {
     const groupId = context.req.param('id');
