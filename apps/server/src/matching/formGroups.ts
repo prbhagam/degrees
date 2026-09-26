@@ -2,12 +2,17 @@
 import { ThinkingLevel, Type } from '@google/genai';
 import { z } from 'zod';
 import type { FormGroupsInput, FormGroupsOutput } from '@degrees/shared';
-import { FLASH_MODEL, getAiClient } from '../ai/client.js';
+import { FLASH_LITE_MODEL, FLASH_MODEL, getAiClient } from '../ai/client.js';
 import { env } from '../config/env.js';
 
 // Group size is soft, but never let a model response balloon a group past this.
 export const ABSOLUTE_MAX_GROUP = 8;
-const DEFAULT_TIMEOUT_MS = 8000;
+// Flash first for the better reasoning, then Lite, inside the old 8s budget so match/run still answers within
+// Netlify's ~10s. On Sep 26 Flash mostly 503'd or ran past 8s while Lite answered in ~1s.
+const ATTEMPTS = [
+  { model: FLASH_MODEL, timeoutMs: 4500 },
+  { model: FLASH_LITE_MODEL, timeoutMs: 3000 },
+] as const;
 
 export interface FormGroupsOptions {
   requesterName?: string;
@@ -16,9 +21,10 @@ export interface FormGroupsOptions {
   paths?: Record<string, string[]>;
   // Candidate id → stage-2 signals. Without these the model only knows the list order and ignores feedback.
   signals?: Record<string, { score: number; meetAgain: number }>;
+  // Per-attempt timeout override (tests).
   timeoutMs?: number;
-  // Test seam; defaults to Gemini Flash. Must resolve to the raw JSON text.
-  generate?: (prompt: string, signal: AbortSignal) => Promise<string>;
+  // Test seam; defaults to Gemini. Called once per attempt (Flash, then Lite). Must resolve to the raw JSON text.
+  generate?: (prompt: string, signal: AbortSignal, model: string) => Promise<string>;
 }
 
 const modelOutputSchema = z.object({
@@ -160,8 +166,33 @@ export function sanitizeModelGroup(
     }
   }
 
+  // Degrees of separation is the product: if the model left out every friend-of-a-friend while one is available,
+  // swap in the best-scoring one (candidates arrive score-ordered) so the group can show a real path.
+  const byId = new Map(input.candidates.map((c) => [c.id, c]));
+  const distant = (id: string) => (byId.get(id)?.degree ?? 0) >= 2;
+  if (!valid.some(distant)) {
+    const bridge = input.candidates.find(
+      (c) => known.has(c.id) && c.degree >= 2 && !valid.includes(c.id),
+    );
+    if (bridge) {
+      const { max } = attainableRange(input);
+      if (valid.length + 1 >= max) valid.pop();
+      valid.push(bridge.id);
+      changed = true;
+    }
+  }
+
   const memberIds = [input.requesterId, ...valid];
   const reasoning = raw.reasoning.trim();
+  // The reasoning must name how you're connected: someone on a friend-of-a-friend's path, besides that person.
+  const namesPath = valid.filter(distant).some((id) =>
+    (options.paths?.[id] ?? [])
+      .slice(0, -1)
+      .some((name) => reasoning.toLowerCase().includes(name.toLowerCase())),
+  );
+  if (valid.some(distant) && options.paths && !namesPath) {
+    changed = true;
+  }
   return {
     memberIds,
     reasoning:
@@ -192,7 +223,7 @@ Requester: ${options.requesterName ?? 'the requester'}
 Requester interests: ${(options.requesterInterests ?? []).join(', ') || 'unknown'}
 Target group size including the requester: ${input.sizeRange.min}-${input.sizeRange.max} (soft; best effort)
 
-Candidates are ranked best-first. matchScore (0 to about 1.2) combines profile similarity with past feedback.
+Candidates are ranked best-first. matchScore (0 to about 1.5) combines profile similarity with past feedback.
 wouldMeetAgain counts how many times the requester and this candidate said, after hanging out, that they'd meet
 again. degree 1 = the requester already knows them; degree 2+ = a friend of a friend. connectionPath lists the
 people linking the requester to the candidate, ending with the candidate.
@@ -203,7 +234,8 @@ ${JSON.stringify(candidates, null, 2)}
 Pick the members (excluding the requester) for one group that will enjoy an activity together:
 - Start from the highest matchScore candidates, and strongly prefer anyone with wouldMeetAgain > 0: past
   feedback is the best signal we have. Only pass over a high scorer for a clear reason.
-- Prefer shared interests, a mix of people the requester knows and friends of friends, and real connection paths.
+- If any candidate has degree 2 or more, include at least one of them: meeting friends of friends is the point of
+  Degrees. Otherwise prefer shared interests and a mix of people the requester knows and friends of friends.
 - Respect everyone's budget, travel radius, frequency, and group size softly.
 - Only use ids from the candidate list.
 
@@ -215,9 +247,10 @@ shown to the requester. If any chosen member has degree 2 or more, name their co
 async function generateWithGemini(
   prompt: string,
   signal: AbortSignal,
+  model: string,
 ): Promise<string> {
   const response = await getAiClient().models.generateContent({
-    model: FLASH_MODEL,
+    model,
     contents: prompt,
     config: {
       abortSignal: signal,
@@ -272,25 +305,29 @@ export async function formGroups(
     return fallbackGroup(input, options);
   }
 
-  try {
-    const text = await withTimeout(
-      (signal) => generate(buildPrompt(input, options), signal),
-      options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    );
-    const parsed = modelOutputSchema.safeParse(JSON.parse(text));
-    if (!parsed.success) {
-      throw new Error(`model output failed validation: ${parsed.error.message}`);
+  const prompt = buildPrompt(input, options);
+  for (const { model, timeoutMs } of ATTEMPTS) {
+    try {
+      const text = await withTimeout(
+        (signal) => generate(prompt, signal, model),
+        options.timeoutMs ?? timeoutMs,
+      );
+      const parsed = modelOutputSchema.safeParse(JSON.parse(text));
+      if (!parsed.success) {
+        throw new Error(`model output failed validation: ${parsed.error.message}`);
+      }
+      const group = sanitizeModelGroup(input, parsed.data, options);
+      if (!group) {
+        throw new Error('model returned no known candidate ids');
+      }
+      return group;
+    } catch (error) {
+      console.warn(
+        `formGroups ${model} failed:`,
+        error instanceof Error ? error.message : error,
+      );
     }
-    const group = sanitizeModelGroup(input, parsed.data, options);
-    if (!group) {
-      throw new Error('model returned no known candidate ids');
-    }
-    return group;
-  } catch (error) {
-    console.warn(
-      'formGroups fallback:',
-      error instanceof Error ? error.message : error,
-    );
-    return fallbackGroup(input, options);
   }
+  console.warn('formGroups fallback: every model failed; using top-N by score');
+  return fallbackGroup(input, options);
 }

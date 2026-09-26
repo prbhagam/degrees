@@ -168,8 +168,8 @@ begin
   end if;
   -- Pool-relative score: the most similar candidate gets 1 (+ boost), the least similar with an embedding gets 0.
   if (select min(score) from narrowed where similarity is not null and meet_again_score = 0) <> 0
-     or (select max(score) from narrowed) <> 1 + 0.1 * 2 then
-    raise exception 'score should be similarity rescaled 0–1 within the pool plus 0.1 per meet-again (max 2)';
+     or (select max(score) from narrowed) <> 1 + 0.25 * 2 then
+    raise exception 'score should be similarity rescaled 0–1 within the pool plus 0.25 per meet-again (max 2)';
   end if;
 end $$;
 
