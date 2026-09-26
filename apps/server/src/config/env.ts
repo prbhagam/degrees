@@ -27,6 +27,10 @@ const rawSchema = z.object({
     emptyToUndefined,
     z.coerce.number().int().positive().optional(),
   ),
+  // Netlify Background Functions need a Pro-or-higher plan; the team's account is legacy, so the default is the
+  // inline path (generation inside the request, within generateActivity's 9s budget). Set true on a plan that
+  // has them to answer instantly with a 'generating' placeholder instead.
+  ACTIVITY_BACKGROUND: z.preprocess(emptyToUndefined, z.string().optional()),
   GOOGLE_MAPS_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   TICKETMASTER_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
   RESEND_API_KEY: z.preprocess(emptyToUndefined, z.string().optional()),
@@ -87,6 +91,9 @@ export function getEnv() {
     supabaseServiceRoleKey,
     geminiApiKey,
     geminiRpm: parsed.data.GEMINI_RPM ?? (process.env.GEMINI_RPM ? Number(process.env.GEMINI_RPM) : 15),
+    activityBackground: ['true', '1'].includes(
+      (parsed.data.ACTIVITY_BACKGROUND ?? process.env.ACTIVITY_BACKGROUND ?? '').toLowerCase(),
+    ),
     googleMapsApiKey:
       parsed.data.GOOGLE_MAPS_API_KEY ?? process.env.GOOGLE_MAPS_API_KEY,
     ticketmasterApiKey:
