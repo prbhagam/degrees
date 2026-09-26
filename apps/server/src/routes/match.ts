@@ -196,24 +196,42 @@ export const matchRoutes = new Hono<AppEnv>().post(
       others.flatMap((c) => c.interests.map((l) => l.toLowerCase())),
     );
 
+    // CHANGED Sep 26: members past 1st degree are redacted — no id, no displayName. Matches the
+    // same rule applied in lib/groups.ts's loadGroup(): you only see someone's identity once you've
+    // actually met them, not just because they're proposed as a match.
+    const members: MatchRunResponse['members'] = [
+      {
+        id: userId,
+        displayName: requesterName,
+        degree: 0,
+        sharedInterests: requesterInterests.filter((label) =>
+          everyoneElse.has(label.toLowerCase()),
+        ),
+        revealed: true,
+      },
+      ...others.map((c): MatchRunResponse['members'][number] =>
+        c.degree <= 1
+          ? {
+              id: c.id,
+              displayName: c.displayName,
+              degree: c.degree,
+              sharedInterests: sharedWith(c.interests),
+              revealed: true,
+            }
+          : {
+              id: null,
+              displayName: null,
+              degree: c.degree,
+              sharedInterests: sharedWith(c.interests),
+              revealed: false,
+            },
+      ),
+    ];
+
     const response = {
       groupId,
-      members: [
-        {
-          id: userId,
-          displayName: requesterName,
-          degree: 0,
-          sharedInterests: requesterInterests.filter((label) =>
-            everyoneElse.has(label.toLowerCase()),
-          ),
-        },
-        ...others.map((c) => ({
-          id: c.id,
-          displayName: c.displayName,
-          degree: c.degree,
-          sharedInterests: sharedWith(c.interests),
-        })),
-      ],
+      members,
+      unrevealedCount: members.filter((member) => !member.revealed).length,
       reasoning: group.reasoning,
     } satisfies MatchRunResponse;
     return context.json(response);
