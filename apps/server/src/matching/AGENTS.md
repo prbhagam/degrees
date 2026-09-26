@@ -8,19 +8,22 @@ The logic that decides who meets whom. **Owner:** Sahith. It lives inside Christ
 
 | Stage | File | Kind | Status |
 |---|---|---|---|
-| 1. Traverse | `traverse.ts` | SQL: recursive CTE over `connections` from the requester, depth ≤ `max_degrees` (cap 3) | Stub — **PROPOSED signature** |
-| 2. Narrow | `narrow.ts` | SQL: pgvector cosine similarity vs. the requester's embedding, filtered on cost overlap, travel distance, meet-again signals | Stub — **PROPOSED signature** |
-| 3. Form | `formGroups.ts` | Gemini Flash assembles the group + human-readable reasoning | Stub — signature frozen in API-CONTRACTS |
+| 1. Traverse | `traverse.ts` | RPC `match_traverse` (migration 0003): recursive CTE over `connections`, both directions, depth ≤ `max_degrees` (cap 3), shortest degree + one deterministic path per person | Built |
+| 2. Narrow | `narrow.ts` | RPC `match_narrow`: cosine similarity vs. the requester's embedding, soft cost/travel filters, meet-again boost, excludes any "wouldn't meet again" pair | Built |
+| 3. Form | `formGroups.ts` | Gemini Flash picks members + reasoning; output sanitized; deterministic fallback | Built |
 | 4. Plan | `../ai/generateActivity.ts` | Gemini + Maps grounding | Christian's |
 
-`routes/match.ts` returns `matchFixture` directly today. It switches to calling traverse → narrow → formGroups **once Sahith and Christian agree the boundary at H0**. Until then, the `traverse`/`narrow` signatures are proposals, not contracts.
+`routes/match.ts` runs traverse → narrow → formGroups in real mode and persists the group with RPC `match_create_group` (one transaction). Mock mode still returns `matchFixture`. Candidates carry `path` (user ids requester → candidate) so reasoning can name the connection.
+
+Tests: `supabase/tests/run-local.sh` (SQL, throwaway local Postgres) and `npx tsx apps/server/src/matching/formGroups.test.ts` (no network).
 
 ## Rules
 
 - **Group size is a soft constraint.** Aim for every member's `groupSizeMin`–`groupSizeMax`, and never drop a good group over it.
-- **Matching never hard-fails.** If Gemini errors, times out, or returns ids that aren't in the candidate list, fall back to **top-N by similarity** from stage 2. The H14 gate depends on it.
+- **Matching never hard-fails.** If Gemini errors, times out, or returns ids that aren't in the candidate list, fall back to **top-N by stage-2 score** (pool-relative similarity + a small meet-again boost), with deterministic reasoning. Model output is also sanitized: unknown/duplicate ids dropped, backfilled to the minimum size, capped at 8. The H14 gate depends on it.
 - **Degrees:** the requester is degree 0 in responses (a contract gap, to confirm). Direct connections are 1 and mutuals are 2. `reasoning` should name the path ("you and Maya both know Chris"), because that's the demo beat.
 - `connections` stores each edge once with `user_a < user_b`. The traversal must walk **both** directions (`user_a = x OR user_b = x`). There's an index on `user_b` for this.
 - Stages 1–2 read with the **service-role client** (`../db/supabase.ts`), and so bypass RLS. Never return another user's `bio` unless they're in the formed group.
-- These files import nothing from `../mocks/fixtures.ts`, which keeps the lanes decoupled. Each stub carries its own local mock data.
+- These files import nothing from `../mocks/fixtures.ts`, which keeps the lanes decoupled.
+- `score` in narrow = `similarity rescaled 0–1 within the pool + 0.1 × min(meet-again yeses, 2)`. Gemini similarities are anisotropic (every profile pair measured 0.85–0.94), so raw values are only meaningful relative to each other; the boost reorders near-ties but can't lift the least similar candidate past the most similar.
 - Keep matching-internal types (`Candidate`, `NarrowedCandidate`) here. Put a type in `@degrees/shared` only if the app needs it.
