@@ -5,6 +5,7 @@ __pycache__/
 # Dependencies and build output
 node_modules/
 dist/
+.netlify/
 
 # Local environment files; the documented empty template stays tracked.
 .env.*

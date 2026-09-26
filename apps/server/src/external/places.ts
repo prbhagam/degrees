@@ -12,7 +12,7 @@ const FIELDS = [
   'priceRange',
   'googleMapsUri',
 ];
-const TIMEOUT_MS = 8_000;
+const DEFAULT_TIMEOUT_MS = 4_000;
 
 export interface PlaceInfo {
   placeId: string;
@@ -80,6 +80,7 @@ async function placesFetch(
   path: string,
   init: RequestInit,
   fieldMask: string,
+  timeoutMs: number,
 ): Promise<unknown> {
   if (!env.googleMapsApiKey) {
     throw new Error('GOOGLE_MAPS_API_KEY is not set.');
@@ -90,7 +91,7 @@ async function placesFetch(
   const response = await fetch(`${PLACES_BASE}${path}`, {
     ...init,
     headers,
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(Math.max(1, timeoutMs)),
   });
   if (!response.ok) {
     throw new Error(
@@ -101,7 +102,10 @@ async function placesFetch(
 }
 
 // placeId accepts both "places/ChIJ…" (Maps grounding) and a bare "ChIJ…".
-export async function placeDetails(placeId: string): Promise<PlaceInfo | null> {
+export async function placeDetails(
+  placeId: string,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<PlaceInfo | null> {
   const resource = placeId.startsWith('places/')
     ? placeId
     : `places/${placeId}`;
@@ -109,6 +113,7 @@ export async function placeDetails(placeId: string): Promise<PlaceInfo | null> {
     `/${resource}`,
     { method: 'GET' },
     FIELDS.join(','),
+    Math.min(timeoutMs, DEFAULT_TIMEOUT_MS),
   )) as PlaceResource;
   return toPlaceInfo(place);
 }
@@ -116,6 +121,7 @@ export async function placeDetails(placeId: string): Promise<PlaceInfo | null> {
 export async function searchPlace(
   query: string,
   near: { lat: number; lng: number; radiusMi: number },
+  timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<PlaceInfo | null> {
   const body = (await placesFetch(
     '/places:searchText',
@@ -135,6 +141,7 @@ export async function searchPlace(
       }),
     },
     FIELDS.map((field) => `places.${field}`).join(','),
+    Math.min(timeoutMs, DEFAULT_TIMEOUT_MS),
   )) as { places?: PlaceResource[] };
   const first = body.places?.[0];
   return first ? toPlaceInfo(first) : null;

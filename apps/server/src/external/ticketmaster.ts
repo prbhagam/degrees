@@ -5,7 +5,7 @@ import { env } from '../config/env.js';
 const DISCOVERY_URL = 'https://app.ticketmaster.com/discovery/v2/events.json';
 const CACHE_TTL_MS = 10 * 60_000;
 const LOOKAHEAD_DAYS = 14;
-const TIMEOUT_MS = 8_000;
+const DEFAULT_TIMEOUT_MS = 4_000;
 
 export interface TicketedEvent {
   name: string;
@@ -88,11 +88,10 @@ function toTicketedEvent(event: DiscoveryEvent): TicketedEvent | null {
   };
 }
 
-export async function upcomingEventsNear(near: {
-  lat: number;
-  lng: number;
-  radiusMi: number;
-}): Promise<TicketedEvent[]> {
+export async function upcomingEventsNear(
+  near: { lat: number; lng: number; radiusMi: number },
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+): Promise<TicketedEvent[]> {
   if (!env.ticketmasterApiKey) {
     throw new Error('TICKETMASTER_API_KEY is not set.');
   }
@@ -117,7 +116,9 @@ export async function upcomingEventsNear(near: {
     ),
   });
   const response = await fetch(`${DISCOVERY_URL}?${params}`, {
-    signal: AbortSignal.timeout(TIMEOUT_MS),
+    signal: AbortSignal.timeout(
+      Math.max(1, Math.min(timeoutMs, DEFAULT_TIMEOUT_MS)),
+    ),
   });
   if (!response.ok) {
     throw new Error(

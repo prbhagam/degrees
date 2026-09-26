@@ -1,6 +1,6 @@
 # apps/server — agent context
 
-The Degrees API server: **Node + TypeScript + Hono**, a long-running process on a Vultr VPS (never Supabase Edge Functions). Read the root [AGENTS.md](../../AGENTS.md) first. This file covers what's specific to the server.
+The Degrees API server: **Node + TypeScript + Hono**, deployed to Netlify (never Supabase Edge Functions). Read the root [AGENTS.md](../../AGENTS.md) first. This file covers what's specific to the server.
 
 **Owner:** Christian (framework, auth, routes, AI, deploy). **Exception:** `src/matching/` is Sahith's. See [its AGENTS.md](./src/matching/AGENTS.md).
 
