@@ -61,7 +61,7 @@ Items marked **(meeting)** were decided in the Sep 25 architecture meeting. Item
 | Piece | Where |
 |---|---|
 | iOS app | Expo Go on a phone for dev → EAS Build → TestFlight for testers |
-| API server | Vultr VPS |
+| API server | Netlify |
 | Database + Auth | Supabase |
 | Domain | `api.degrees.tech` for the API (free .tech for a year). A bare server IP only works in dev — see gotchas. |
 
