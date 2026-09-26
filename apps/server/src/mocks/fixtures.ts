@@ -147,24 +147,28 @@ export const matchFixture = {
       displayName: 'Avery Chen',
       degree: 0,
       sharedInterests: ['hackathons'],
+      via: [],
     },
     {
       id: people[1].id,
       displayName: 'Maya Patel',
       degree: 1,
       sharedInterests: ['coffee'],
+      via: [],
     },
     {
       id: people[3].id,
       displayName: 'Jordan Kim',
       degree: 2,
       sharedInterests: ['Atlanta food'],
+      via: [{ id: people[1].id, displayName: people[1].displayName }],
     },
     {
       id: people[5].id,
       displayName: 'Leo Garcia',
       degree: 2,
       sharedInterests: ['bouldering'],
+      via: [{ id: people[2].id, displayName: people[2].displayName }],
     },
   ],
   reasoning:
