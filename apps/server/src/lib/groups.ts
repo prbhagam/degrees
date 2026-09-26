@@ -3,13 +3,52 @@ import {
   activitySchema,
   type Activity,
   type GenerateActivityInput,
+  type GenerateIcebreakersInput,
   type GroupMember,
   type GroupResponse,
   type GroupStatus,
+  type HangoutKind,
 } from '@degrees/shared';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from './errors.js';
 import { exploreFrom, profileBasics } from './graph.js';
+
+// Added Sep 26 (wave 2): a meetup's room-code record (the `events` row behind a kind='meetup' group).
+export interface MeetupRow {
+  id: string;
+  room_code: string;
+  name: string | null;
+  created_by: string | null;
+  scheduled_at: string | null;
+  code_expires_at: string | null;
+  ended_at: string | null;
+  group_id: string | null;
+}
+
+export const MEETUP_COLUMNS =
+  'id, room_code, name, created_by, scheduled_at, code_expires_at, ended_at, group_id';
+
+// A room code accepts joins until it expires (24h after the scheduled time, or creation) or the meetup ends.
+export function isCodeOpen(meetup: Pick<MeetupRow, 'code_expires_at' | 'ended_at'>, now = Date.now()): boolean {
+  if (meetup.ended_at) return false;
+  if (!meetup.code_expires_at) return true;
+  return new Date(meetup.code_expires_at).getTime() > now;
+}
+
+export async function meetupForGroup(groupId: string): Promise<MeetupRow | null> {
+  const { data, error } = await getServiceClient()
+    .from('events')
+    .select(MEETUP_COLUMNS)
+    .eq('group_id', groupId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`events read failed: ${error.message}`);
+  }
+  return (data as MeetupRow | null) ?? null;
+}
+
+const iso = (value: string | null | undefined): string | null =>
+  value ? new Date(value).toISOString() : null;
 
 // Georgia Tech campus — used when no member has a location on file.
 const DEFAULT_CENTER = { city: 'Atlanta', lat: 33.7756, lng: -84.3963 };
@@ -56,12 +95,13 @@ export const ARCHIVE_GRACE_MS = 24 * 60 * 60 * 1000;
 export interface GroupState {
   status: GroupStatus;
   completedAt: string | null;
+  kind: HangoutKind;
 }
 
 export async function groupState(groupId: string): Promise<GroupState> {
   const { data, error } = await getServiceClient()
     .from('groups')
-    .select('status, completed_at')
+    .select('status, completed_at, kind')
     .eq('id', groupId)
     .single();
   if (error) {
@@ -70,6 +110,55 @@ export async function groupState(groupId: string): Promise<GroupState> {
   return {
     status: (data.status as GroupStatus | null) ?? 'proposed',
     completedAt: (data.completed_at as string | null) ?? null,
+    kind: (data.kind as HangoutKind | null) ?? 'matched',
+  };
+}
+
+// ---- Icebreakers (Added Sep 26, wave 2) ---------------------------------------------------------
+export async function listIcebreakers(groupId: string): Promise<string[]> {
+  const { data, error } = await getServiceClient()
+    .from('group_icebreakers')
+    .select('prompt, position')
+    .eq('group_id', groupId)
+    .order('position', { ascending: true });
+  if (error) {
+    throw new Error(`group_icebreakers read failed: ${error.message}`);
+  }
+  return data.map((row) => row.prompt as string);
+}
+
+// One set per group: regenerating replaces the previous set.
+export async function saveIcebreakers(groupId: string, prompts: string[]): Promise<void> {
+  const db = getServiceClient();
+  const { error: deleteError } = await db.from('group_icebreakers').delete().eq('group_id', groupId);
+  if (deleteError) {
+    throw new Error(`group_icebreakers delete failed: ${deleteError.message}`);
+  }
+  if (prompts.length === 0) return;
+  const { error } = await db
+    .from('group_icebreakers')
+    .insert(prompts.map((prompt, position) => ({ group_id: groupId, position, prompt })));
+  if (error) {
+    throw new Error(`group_icebreakers insert failed: ${error.message}`);
+  }
+}
+
+export async function icebreakersInput(groupId: string, viewerId: string): Promise<GenerateIcebreakersInput> {
+  const ids = (await memberRows(groupId, viewerId)).map((row) => row.user_id);
+  const [basics, tags, group] = await Promise.all([
+    profileBasics(ids),
+    tagsByUser(ids),
+    getServiceClient().from('groups').select('name').eq('id', groupId).single(),
+  ]);
+  if (group.error) {
+    throw new Error(`groups read failed: ${group.error.message}`);
+  }
+  return {
+    name: (group.data.name as string | null) ?? null,
+    members: ids.map((id) => ({
+      displayName: basics.get(id)?.displayName ?? 'Someone',
+      interests: tags.get(id) ?? [],
+    })),
   };
 }
 
@@ -156,17 +245,19 @@ export async function loadGroup(
   const ids = rows.map((row) => row.user_id);
   const db = getServiceClient();
 
-  const [groupResult, activityResult, basics, tags, { reach }] =
+  const [groupResult, activityResult, basics, tags, { reach }, meetup, icebreakers] =
     await Promise.all([
       db
         .from('groups')
-        .select('id, status, reasoning, completed_at')
+        .select('id, status, reasoning, completed_at, kind, name, created_by, scheduled_at')
         .eq('id', groupId)
         .single(),
       db.from('activities').select('*').eq('group_id', groupId).limit(1),
       profileBasics(ids),
       tagsByUser(ids),
       exploreFrom(viewerId, undefined, ids),
+      meetupForGroup(groupId),
+      listIcebreakers(groupId),
     ]);
   if (groupResult.error) {
     throw new Error(`groups read failed: ${groupResult.error.message}`);
@@ -176,6 +267,7 @@ export async function loadGroup(
   }
 
   const status = (groupResult.data.status as GroupStatus | null) ?? 'proposed';
+  const kind = (groupResult.data.kind as HangoutKind | null) ?? 'matched';
   const viewerTags = new Set(
     (tags.get(viewerId) ?? []).map((label) => label.toLowerCase()),
   );
@@ -187,8 +279,13 @@ export async function loadGroup(
   const members: GroupMember[] = rows.map(({ user_id: id, degree }) => {
     const path = reach.get(id);
     // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
-    const resolvedDegree = path?.degree ?? degree ?? 0;
-    const revealed = resolvedDegree <= 1 || status !== 'proposed';
+    // Meetup members have no stored degree (they joined a code) — unreachable means "network", never "you".
+    const resolvedDegree =
+      id === viewerId ? 0 : (path?.degree ?? degree ?? (kind === 'meetup' ? 2 : 0));
+    // Meetups are people physically in the same room (co-presence shows basic info — see routes/events.ts), so
+    // nobody is redacted there. Matched groups keep the rule below.
+    const revealed = kind === 'meetup' || resolvedDegree <= 1 || status !== 'proposed';
+    const met = id !== viewerId && path?.degree === 1;
     const sharedInterests =
       id === viewerId
         ? []
@@ -205,6 +302,7 @@ export async function loadGroup(
           degree: resolvedDegree,
           sharedInterests,
           revealed: true,
+          met,
         }
       : {
           id: null,
@@ -214,12 +312,14 @@ export async function loadGroup(
           degree: resolvedDegree,
           sharedInterests,
           revealed: false,
+          met: false,
         };
   });
   members.sort((a, b) => a.degree - b.degree);
   const unrevealedCount = members.filter((member) => !member.revealed).length;
 
   const activityRow = activityResult.data[0] as ActivityRow | undefined;
+  const codeOpen = meetup ? isCodeOpen(meetup) : false;
   return {
     id: groupResult.data.id as string,
     status,
@@ -227,8 +327,43 @@ export async function loadGroup(
     members,
     unrevealedCount,
     activity: activityRow ? toActivity(activityRow) : null,
-    completedAt: (groupResult.data.completed_at as string | null) ?? null,
+    completedAt: iso(groupResult.data.completed_at as string | null),
+    kind,
+    name: (groupResult.data.name as string | null) ?? meetup?.name ?? null,
+    hostId: (groupResult.data.created_by as string | null) ?? meetup?.created_by ?? null,
+    scheduledAt: iso((groupResult.data.scheduled_at as string | null) ?? meetup?.scheduled_at),
+    roomCode: meetup && codeOpen ? meetup.room_code : null,
+    codeExpiresAt: meetup && codeOpen ? iso(meetup.code_expires_at) : null,
+    icebreakers,
   };
+}
+
+// Added Sep 26 (wave 2): leave any group you're in that hasn't wrapped up. Proposed: same as declining.
+// Confirmed group or live meetup: you drop out; the others keep it. Completed: it's history (feedback, photos,
+// the edges it formed), so it can't be left.
+export async function leaveGroup(groupId: string, userId: string): Promise<void> {
+  await memberRows(groupId, userId);
+  const { status } = await groupState(groupId);
+  if (status === 'completed') {
+    throw new ApiError(409, 'group_completed', 'This hangout already happened, so it stays in your history.');
+  }
+  const db = getServiceClient();
+  const { error } = await db.from('group_members').delete().eq('group_id', groupId).eq('user_id', userId);
+  if (error) {
+    throw new Error(`group_members delete failed: ${error.message}`);
+  }
+  // Keep the legacy attendee list in step for meetups (seed/tests still read it).
+  const meetup = await meetupForGroup(groupId);
+  if (meetup) {
+    const { error: attendeeError } = await db
+      .from('event_attendees')
+      .delete()
+      .eq('event_id', meetup.id)
+      .eq('user_id', userId);
+    if (attendeeError) {
+      throw new Error(`event_attendees delete failed: ${attendeeError.message}`);
+    }
+  }
 }
 
 // The group's combined constraints: the tightest budget and travel range, centred on the members.

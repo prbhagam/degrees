@@ -7,6 +7,8 @@ import type {
   createEventRequestSchema,
   exchangeRequestSchema,
   feedbackRequestSchema,
+  generateIcebreakersOutputSchema,
+  hangoutKindSchema,
   notificationTypeSchema,
   respondRequestSchema,
   addPhotoRequestSchema,
@@ -26,6 +28,9 @@ export type ActivitySource = 'maps' | 'ticketmaster';
 export type Sentiment = 'positive' | 'neutral' | 'negative';
 export type FeedbackRelationship = 'great' | 'fine' | 'not_for_me';
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
+// Added Sep 26 (wave 2): a group is matched (auto-generated, non-joinable) or a meetup (joinable by room code /
+// QR, people who actually met in person). Same container either way — see docs/DATA-MODEL.md.
+export type HangoutKind = z.infer<typeof hangoutKindSchema>;
 
 // CONTRACT GAP: assumed nullable database profile fields stay nullable in GET /api/me; confirm at H0.
 // CHANGED Sep 26: added phone/pronouns/photoUrl (collected at signup), and aiParagraph/tags — these
@@ -44,6 +49,17 @@ export interface MeResponse {
   photoUrl: string | null;
   tags: { label: string; kind: TagKind }[];
   hasCompletedProfile: boolean;
+  // Added Sep 26 (wave 2): what onboarding still needs. Matching (POST /match/run) requires all three; hosting
+  // or joining a meetup never does. hasCompletedProfile is now "every step done".
+  profileStatus: ProfileStatus;
+  // Added Sep 26 (wave 2): saved preferences, so the preferences screen prefills. Null until first saved.
+  preferences: UpdatePreferencesRequest | null;
+}
+
+export interface ProfileStatus {
+  interests: boolean;
+  about: boolean;
+  preferences: boolean;
 }
 
 export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;
@@ -93,7 +109,13 @@ export interface GraphResponse {
 
 export interface JoinEventResponse {
   eventId: string;
+  // Added Sep 26 (wave 2): the meetup's backing group — chat, plan, photos, icebreakers, and leave all live there.
+  groupId: string;
   name: string;
+  hostId: string | null;
+  scheduledAt: string | null;
+  codeExpiresAt: string | null;
+  endedAt: string | null;
   // CHANGED Sep 26: bio/photoUrl added — the event lobby shows everyone present, not gated on the
   // connections graph. This does not itself form a connection edge; that's still the explicit
   // "We met" action per attendee (JoinRoomScreen / POST /connections).
@@ -102,6 +124,8 @@ export interface JoinEventResponse {
     displayName: string;
     bio: string | null;
     photoUrl: string | null;
+    // Added Sep 26 (wave 2): a connections edge already exists with the viewer, so "We met" isn't offered again.
+    alreadyMet: boolean;
   }[];
 }
 
@@ -126,6 +150,10 @@ export interface GroupMember {
   // the match is still a live proposal (the actual thing the redaction rule protects), then
   // contradict each other once you're both chatting to coordinate a meetup you already agreed to.
   revealed: boolean;
+  // Added Sep 26 (wave 2): a connections edge exists between the viewer and this member (degree 1). Drives the
+  // per-person "We met" action, which is now the ONLY way a matched group forms edges (completing a matched
+  // group no longer auto-connects everyone; ending a meetup still does).
+  met: boolean;
 }
 
 export interface MatchRunResponse {
@@ -148,7 +176,49 @@ export interface GroupResponse {
   // Set once the host (or any member) marks the hangout done. Chat and photos go read-only
   // 24h after this timestamp — see CreateEvent/Group screens.
   completedAt: string | null;
+  // Added Sep 26 (wave 2) — meetups share this shape. name/roomCode/hostId/scheduledAt/codeExpiresAt are null
+  // for a matched group; roomCode is null once the code has expired or the meetup ended.
+  kind: HangoutKind;
+  name: string | null;
+  hostId: string | null;
+  scheduledAt: string | null;
+  roomCode: string | null;
+  codeExpiresAt: string | null;
+  icebreakers: string[];
 }
+
+// Added Sep 26 (wave 2): GET /api/hangouts — every group the viewer is in, matched and meetup alike, for one home
+// list. Sorted active first (soonest scheduled / most recently formed), then past.
+export interface HangoutSummary {
+  id: string;
+  kind: HangoutKind;
+  name: string | null;
+  status: GroupStatus;
+  reasoning: string;
+  memberCount: number;
+  formedAt: string | null;
+  scheduledAt: string | null;
+  completedAt: string | null;
+  // Meetups only: the code to share, while it's still valid.
+  roomCode: string | null;
+  hostId: string | null;
+  isPast: boolean;
+}
+
+export interface HangoutsResponse {
+  hangouts: HangoutSummary[];
+}
+
+export interface IcebreakersResponse {
+  icebreakers: string[];
+}
+
+export interface GenerateIcebreakersInput {
+  name: string | null;
+  members: { displayName: string; interests: string[] }[];
+}
+
+export type GenerateIcebreakersOutput = z.infer<typeof generateIcebreakersOutputSchema>;
 
 export interface Message {
   // CONTRACT GAP: assumed messages.id bigserial is serialized as a string; confirm at H0.
@@ -199,6 +269,9 @@ export interface Photo {
   uploaderId: string;
   uploaderName: string;
   storagePath: string;
+  // Added Sep 26 (wave 2): a signed read URL for the private event-photos bucket (about an hour). Null in mock
+  // mode or if signing failed; the client shows a placeholder tile then.
+  url: string | null;
   createdAt: string;
 }
 

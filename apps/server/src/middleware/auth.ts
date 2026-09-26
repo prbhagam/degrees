@@ -8,6 +8,8 @@ import { REQUESTER_ID } from '../mocks/fixtures.js';
 export interface AppEnv {
   Variables: {
     userId: string;
+    // Added Sep 26 (wave 2): set by lib/log.ts's requestLogger, echoed in the x-request-id header.
+    requestId: string;
   };
 }
 

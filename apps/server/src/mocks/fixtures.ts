@@ -4,6 +4,8 @@ import type {
   AnalyzeFeedbackOutput,
   GraphResponse,
   GroupResponse,
+  HangoutsResponse,
+  IcebreakersResponse,
   JoinEventResponse,
   MatchRunResponse,
   MeResponse,
@@ -108,17 +110,19 @@ export const meFixture = {
   photoUrl: null,
   tags: people[0].interests.map((label) => ({ label, kind: 'hobby' as const })),
   hasCompletedProfile: true,
+  profileStatus: { interests: true, about: true, preferences: true },
+  preferences: {
+    costMinCents: 0,
+    costMaxCents: 3000,
+    maxTravelMi: 10,
+    frequency: 'biweekly',
+    groupSizeMin: 3,
+    groupSizeMax: 6,
+    maxDegrees: 2,
+  },
 } satisfies MeResponse;
 
-export const preferencesFixture = {
-  costMinCents: 0,
-  costMaxCents: 3000,
-  maxTravelMi: 10,
-  frequency: 'biweekly',
-  groupSizeMin: 3,
-  groupSizeMax: 6,
-  maxDegrees: 2,
-} satisfies UpdatePreferencesRequest;
+export const preferencesFixture = meFixture.preferences satisfies UpdatePreferencesRequest;
 
 // CHANGED Sep 26: the circle view only ever shows 1st-degree connections (Jordan and Leo are
 // degree 2 in matchFixture below — proposed groupmates, not yet met — so they never appear here),
@@ -135,16 +139,35 @@ export const graphFixture = {
   mutualEdges: [{ a: people[1].id, b: people[2].id }],
 } satisfies GraphResponse;
 
+// CHANGED Sep 26 (wave 2): a meetup is backed by a group (DEMO_MEETUP_GROUP_ID); Maya and Chris are already
+// 1st-degree in graphFixture, so the lobby shows them as met rather than offering "We met" again.
+export const DEMO_MEETUP_GROUP_ID = '30000000-0000-4000-8000-000000000002';
 export const eventFixture = {
   eventId: DEMO_EVENT_ID,
+  groupId: DEMO_MEETUP_GROUP_ID,
   name: 'HackGT Opening Mixer',
-  attendees: people.slice(0, 6).map(({ id, displayName, bio }) => ({
+  hostId: people[2].id,
+  scheduledAt: '2026-09-26T22:00:00.000Z',
+  codeExpiresAt: '2026-09-27T22:00:00.000Z',
+  endedAt: null,
+  attendees: people.slice(0, 6).map(({ id, displayName, bio }, index) => ({
     id,
     displayName,
     bio,
     photoUrl: null,
+    alreadyMet: index === 1 || index === 2,
   })),
 } satisfies JoinEventResponse;
+
+export const icebreakersFixture = {
+  icebreakers: [
+    'Avery and Leo both boulder — what was the first climb that actually scared you?',
+    "Maya's into ceramics and Jordan shoots photos: what's something you made recently that you're weirdly proud of?",
+    'Chris and Avery have both done hackathons — best 3am decision you ever made at one?',
+    "What's one spot in Atlanta you'd take a visitor to first?",
+    'If this group had a weekly tradition, what should it be?',
+  ],
+} satisfies IcebreakersResponse;
 
 export const activityFixture = {
   title: 'Duckpin Bowling and Food Hall Hangout',
@@ -174,6 +197,7 @@ export const matchFixture = {
       degree: 0,
       sharedInterests: ['hackathons'],
       revealed: true,
+      met: false,
     },
     {
       id: people[1].id,
@@ -183,6 +207,7 @@ export const matchFixture = {
       degree: 1,
       sharedInterests: ['coffee'],
       revealed: true,
+      met: true,
     },
     {
       id: null,
@@ -192,6 +217,7 @@ export const matchFixture = {
       degree: 2,
       sharedInterests: ['Atlanta food'],
       revealed: false,
+      met: false,
     },
     {
       id: null,
@@ -201,6 +227,7 @@ export const matchFixture = {
       degree: 2,
       sharedInterests: ['bouldering'],
       revealed: false,
+      met: false,
     },
   ],
   unrevealedCount: 2,
@@ -225,6 +252,7 @@ export const groupFixture = {
       degree: 0,
       sharedInterests: ['hackathons'],
       revealed: true,
+      met: false,
     },
     {
       id: people[1].id,
@@ -234,6 +262,7 @@ export const groupFixture = {
       degree: 1,
       sharedInterests: ['coffee'],
       revealed: true,
+      met: true,
     },
     {
       id: people[3].id,
@@ -243,6 +272,7 @@ export const groupFixture = {
       degree: 2,
       sharedInterests: ['Atlanta food'],
       revealed: true,
+      met: false,
     },
     {
       id: people[5].id,
@@ -252,12 +282,54 @@ export const groupFixture = {
       degree: 2,
       sharedInterests: ['bouldering'],
       revealed: true,
+      met: false,
     },
   ],
   unrevealedCount: 0,
   activity: activityFixture,
   completedAt: null,
+  kind: 'matched',
+  name: null,
+  hostId: null,
+  scheduledAt: null,
+  roomCode: null,
+  codeExpiresAt: null,
+  icebreakers: [],
 } satisfies GroupResponse;
+
+// Added Sep 26 (wave 2): the home list — the demo group plus a wrapped-up meetup for the "past" section.
+export const hangoutsFixture = {
+  hangouts: [
+    {
+      id: DEMO_GROUP_ID,
+      kind: 'matched',
+      name: null,
+      status: 'confirmed',
+      reasoning: matchFixture.reasoning,
+      memberCount: 4,
+      formedAt: '2026-09-26T13:00:00.000Z',
+      scheduledAt: null,
+      completedAt: null,
+      roomCode: null,
+      hostId: null,
+      isPast: false,
+    },
+    {
+      id: DEMO_MEETUP_GROUP_ID,
+      kind: 'meetup',
+      name: 'HackGT Opening Mixer',
+      status: 'completed',
+      reasoning: '',
+      memberCount: 6,
+      formedAt: '2026-09-25T22:00:00.000Z',
+      scheduledAt: '2026-09-25T22:00:00.000Z',
+      completedAt: '2026-09-26T01:00:00.000Z',
+      roomCode: null,
+      hostId: people[2].id,
+      isPast: true,
+    },
+  ],
+} satisfies HangoutsResponse;
 
 export const photosFixture = {
   photos: [] as Photo[],
