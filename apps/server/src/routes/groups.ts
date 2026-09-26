@@ -233,12 +233,24 @@ export const groupRoutes = new Hono<AppEnv>()
       const response: Activity = mockActivity;
       return context.json(response);
     }
-    // Christian (PR #22): answer in <100ms with a 'generating' placeholder, then generate off the request path —
-    // a Netlify Background Function in production (up to 15 min), an un-awaited task in local dev. The app
-    // subscribes to `activities` and polls every 2s until the row flips to 'ready' (features/groups/queries.ts).
     await memberRows(groupId, userId);
-    const placeholder = await setActivityGenerating(groupId);
 
+    // Default (legacy Netlify plan, no Background Functions, 10s function limit): generate inside the request.
+    // generateActivity's own 9s budget keeps it under the limit and it never hard-fails (fixture last).
+    if (!env.activityBackground) {
+      const input = await activityInput(groupId, userId);
+      const response: Activity = await timed('ai.activity', { groupId, mode: 'inline' }, () =>
+        generateActivity(input),
+      );
+      await saveActivity(groupId, { ...response, status: 'ready' }, 'ready');
+      return context.json(response);
+    }
+
+    // ACTIVITY_BACKGROUND=true (Christian, PR #22): answer in <100ms with a 'generating' placeholder, then
+    // generate off the request path — a Netlify Background Function in production (up to 15 min), an
+    // un-awaited task in local dev. The app subscribes to `activities` and polls every 2s until the row flips
+    // to 'ready' (features/groups/queries.ts).
+    const placeholder = await setActivityGenerating(groupId);
     const isNetlify = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
     if (isNetlify) {
       const netlifyUrl = process.env.URL || 'https://degrees-api.netlify.app';
@@ -248,6 +260,8 @@ export const groupRoutes = new Hono<AppEnv>()
         body: JSON.stringify({ groupId, userId }),
       })
         .then((response) => {
+          // 202 = accepted as a background function. Anything else means the plan ran it synchronously (or not
+          // at all); the row stays 'generating', so the app keeps polling — set ACTIVITY_BACKGROUND=false.
           log.info('activity.background.invoked', { groupId, userId, status: response.status });
         })
         .catch((error: unknown) => {
@@ -257,7 +271,7 @@ export const groupRoutes = new Hono<AppEnv>()
       void (async () => {
         try {
           const input = await activityInput(groupId, userId);
-          const activity = await timed('ai.activity', { groupId }, () => generateActivity(input));
+          const activity = await timed('ai.activity', { groupId, mode: 'background' }, () => generateActivity(input));
           await saveActivity(groupId, activity, 'ready');
         } catch (error) {
           log.error('activity.background.local_failed', error, { groupId, userId });

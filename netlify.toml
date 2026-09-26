@@ -6,7 +6,8 @@
 [functions]
   node_bundler = "esbuild"
   included_files = ["packages/shared/**", "apps/server/**"]
-  timeout = 26
+  # No `timeout` override: the account is on a legacy plan (10s synchronous limit, no Background Functions).
+  # generateActivity keeps itself inside 9s; set ACTIVITY_BACKGROUND=true only on a plan that allows both.
 
 [[redirects]]
   from = "/api/*"

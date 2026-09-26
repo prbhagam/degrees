@@ -30,7 +30,8 @@ src/routes/*.ts          one Hono sub-app per contract area: me, profile, prefer
 src/ai/                  Gemini wrapper + the AI calls (wave 2 adds generateIcebreakers) + the global rate limiter — see src/ai/AGENTS.md
 src/matching/            Sahith's pipeline — see src/matching/AGENTS.md
 src/mocks/fixtures.ts    the coherent mock world every stub returns (Atlanta, HackGT, demo group)
-netlify/functions/       api.ts (Hono router) + activity-background.ts (asynchronous activity generation)
+netlify/functions/       api.ts (Hono router) + activity-background.ts (async activity generation; only used when
+                         ACTIVITY_BACKGROUND=true — Background Functions need a Pro+ plan and the account is legacy)
 ```
 
 ## Mock mode vs real mode
@@ -57,7 +58,7 @@ When a route goes real, replace its fixture return with the real query but keep 
 
 ## Deployed
 
-Production is **`https://degrees-api.netlify.app`** (Netlify Functions, real mode; `netlify.toml` routes `/api/*` and `/health` to the function). A merge to `main` doesn't deploy by itself — redeploy after merging server changes (PR #14 + migration `0006` went live together on Sep 26). Every request must finish inside Netlify's ~10s limit; match and activity measured ~2.8s on Sep 26.
+Production is **`https://degrees-api.netlify.app`** (Netlify Functions, real mode; `netlify.toml` routes `/api/*` and `/health` to the function). A merge to `main` doesn't deploy by itself — redeploy after merging server changes (PR #14 + migration `0006` went live together on Sep 26). **The account is a legacy Netlify plan:** every request must finish inside the 10s synchronous limit (the `timeout` key can't raise it) and Background Functions aren't available, so `POST /groups/:id/activity` generates inline by default (`ACTIVITY_BACKGROUND` unset). Match and activity measured ~2.8s on Sep 26. Functions use the modern default-export API (`api.ts`, `activity-background.ts`) — the legacy `export const handler` form fails at init under `"type": "module"`.
 
 ## Running it
 
