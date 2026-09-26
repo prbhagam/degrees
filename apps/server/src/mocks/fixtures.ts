@@ -125,8 +125,8 @@ export const preferencesFixture = {
 // plus `mutualEdges` between two of the viewer's own connections who also know each other.
 export const graphFixture = {
   nodes: [
-    { id: people[1].id, displayName: 'Maya Patel', metAt: 'HackGT Opening Mixer' },
-    { id: people[2].id, displayName: 'Chris Brooks', metAt: 'HackGT Opening Mixer' },
+    { id: people[1].id, displayName: 'Maya Patel', bio: people[1].bio, photoUrl: null, metAt: 'HackGT Opening Mixer' },
+    { id: people[2].id, displayName: 'Chris Brooks', bio: people[2].bio, photoUrl: null, metAt: 'HackGT Opening Mixer' },
   ],
   edges: [
     { a: REQUESTER_ID, b: people[1].id },
@@ -138,9 +138,11 @@ export const graphFixture = {
 export const eventFixture = {
   eventId: DEMO_EVENT_ID,
   name: 'HackGT Opening Mixer',
-  attendees: people.slice(0, 6).map(({ id, displayName }) => ({
+  attendees: people.slice(0, 6).map(({ id, displayName, bio }) => ({
     id,
     displayName,
+    bio,
+    photoUrl: null,
   })),
 } satisfies JoinEventResponse;
 
@@ -167,6 +169,8 @@ export const matchFixture = {
     {
       id: REQUESTER_ID,
       displayName: 'Avery Chen',
+      bio: people[0].bio,
+      photoUrl: null,
       degree: 0,
       sharedInterests: ['hackathons'],
       revealed: true,
@@ -174,6 +178,8 @@ export const matchFixture = {
     {
       id: people[1].id,
       displayName: 'Maya Patel',
+      bio: people[1].bio,
+      photoUrl: null,
       degree: 1,
       sharedInterests: ['coffee'],
       revealed: true,
@@ -181,6 +187,8 @@ export const matchFixture = {
     {
       id: null,
       displayName: null,
+      bio: null,
+      photoUrl: null,
       degree: 2,
       sharedInterests: ['Atlanta food'],
       revealed: false,
@@ -188,6 +196,8 @@ export const matchFixture = {
     {
       id: null,
       displayName: null,
+      bio: null,
+      photoUrl: null,
       degree: 2,
       sharedInterests: ['bouldering'],
       revealed: false,
@@ -198,22 +208,56 @@ export const matchFixture = {
     'You already know Maya, and two more people from your wider network share hands-on activities and low-key Atlanta outings with you.',
 } satisfies MatchRunResponse;
 
+// CHANGED Sep 26: unlike matchFixture above (a still-proposed match, redacted), this group is
+// `confirmed` — accepting is itself a commitment to meet, so Jordan and Leo (degree 2, the same
+// two people redacted in matchFixture) are revealed here with real name + bio, matching
+// messagesFixture below where they're already named senders.
 export const groupFixture = {
   id: DEMO_GROUP_ID,
   status: 'confirmed',
   reasoning: matchFixture.reasoning,
-  members: matchFixture.members,
-  unrevealedCount: matchFixture.unrevealedCount,
+  members: [
+    {
+      id: REQUESTER_ID,
+      displayName: 'Avery Chen',
+      bio: people[0].bio,
+      photoUrl: null,
+      degree: 0,
+      sharedInterests: ['hackathons'],
+      revealed: true,
+    },
+    {
+      id: people[1].id,
+      displayName: 'Maya Patel',
+      bio: people[1].bio,
+      photoUrl: null,
+      degree: 1,
+      sharedInterests: ['coffee'],
+      revealed: true,
+    },
+    {
+      id: people[3].id,
+      displayName: 'Jordan Kim',
+      bio: people[3].bio,
+      photoUrl: null,
+      degree: 2,
+      sharedInterests: ['Atlanta food'],
+      revealed: true,
+    },
+    {
+      id: people[5].id,
+      displayName: 'Leo Garcia',
+      bio: people[5].bio,
+      photoUrl: null,
+      degree: 2,
+      sharedInterests: ['bouldering'],
+      revealed: true,
+    },
+  ],
+  unrevealedCount: 0,
   activity: activityFixture,
   completedAt: null,
 } satisfies GroupResponse;
-
-export const eventLobbyFixture = {
-  eventId: DEMO_EVENT_ID,
-  roomCode: DEMO_EVENT_CODE,
-  name: 'HackGT Opening Mixer',
-  attendees: people.slice(0, 3).map(({ id, displayName }) => ({ id, displayName })),
-};
 
 export const photosFixture = {
   photos: [] as Photo[],

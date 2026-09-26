@@ -1,5 +1,6 @@
 // Owner: Christian (Server & Infra) — Added Sep 26.
 import type { Notification } from '@degrees/shared';
+import { formatDistanceToNowStrict, parseISO } from 'date-fns';
 import { Stack, useRouter, type Href } from 'expo-router';
 import { Pressable, Text, View } from 'react-native';
 import { ErrorState, LoadingState, Muted, Screen } from '@/components/ui';
@@ -59,6 +60,7 @@ export function NotificationsScreen() {
                   <Text className="font-body-semibold text-sm text-ink">{copy.title}</Text>
                   <Muted className="mt-0.5">{copy.subtitle}</Muted>
                 </View>
+                <Muted>{formatDistanceToNowStrict(parseISO(notification.createdAt), { addSuffix: true })}</Muted>
               </Pressable>
             );
           })}

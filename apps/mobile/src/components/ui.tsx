@@ -4,6 +4,7 @@
 import type { ReactNode } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   Text,
@@ -11,6 +12,7 @@ import {
   View,
   type ScrollViewProps,
   type TextInputProps,
+  type TextProps,
 } from 'react-native';
 import { Lock, Minus, Plus } from 'lucide-react-native';
 
@@ -76,11 +78,16 @@ export function Body({
 export function Muted({
   children,
   className = '',
+  ...props
 }: {
   children: ReactNode;
   className?: string;
-}) {
-  return <Text className={`font-body text-sm text-muted ${className}`}>{children}</Text>;
+} & Pick<TextProps, 'numberOfLines'>) {
+  return (
+    <Text className={`font-body text-sm text-muted ${className}`} {...props}>
+      {children}
+    </Text>
+  );
 }
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost';
@@ -167,11 +174,13 @@ export function initials(name: string): string {
 
 export function Avatar({
   name,
+  photoUrl = null,
   size = 'md',
   tone = 'met',
   locked = false,
 }: {
   name: string;
+  photoUrl?: string | null;
   size?: 'sm' | 'md' | 'lg';
   tone?: 'you' | 'met' | 'unmet';
   locked?: boolean;
@@ -186,6 +195,15 @@ export function Avatar({
         ? 'border-2 border-dashed border-line bg-paper'
         : 'bg-sage';
   const textColor = tone === 'you' || (!locked && tone === 'met') ? 'text-paper' : 'text-muted';
+  if (!locked && photoUrl) {
+    return (
+      <Image
+        source={{ uri: photoUrl }}
+        className={`${box} rounded-full`}
+        accessibilityLabel={name}
+      />
+    );
+  }
   return (
     <View className={`${box} items-center justify-center rounded-full ${boxStyle}`}>
       {locked ? (
@@ -337,7 +355,12 @@ export function Field({
     <View className="gap-1.5">
       {label ? <Text className="font-body-semibold text-[13px] text-muted">{label}</Text> : null}
       <TextInput
-        className="rounded-m border border-line bg-paper-raised px-4 py-3.5 font-body text-base text-ink"
+        // CHANGED Sep 26: py-3.5 with no explicit line-height let the OS center the cursor/typed
+        // text against the font's natural line box, which sits higher than the placeholder text —
+        // visible as soon as you start typing. Fixed line-height + textAlignVertical keeps both
+        // aligned the same way in every state (empty, placeholder, typed, multiline).
+        className="rounded-m border border-line bg-paper-raised px-4 py-3 font-body text-base leading-5 text-ink"
+        style={{ textAlignVertical: props.multiline ? 'top' : 'center' }}
         placeholderTextColor="#8A8378"
         {...props}
       />

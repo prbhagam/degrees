@@ -19,6 +19,7 @@ function polarPosition(index: number, total: number, radius: number, center: num
 
 export function CircleScreen() {
   const [mode, setMode] = useState<Mode>('list');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const me = useMe();
   const graph = useQuery({ queryKey: ['graph', 'me'], queryFn: api.getGraph });
 
@@ -26,6 +27,7 @@ export function CircleScreen() {
   const size = 320;
   const center = size / 2;
   const positions = new Map(nodes.map((node, i) => [node.id, polarPosition(i, nodes.length || 1, 120, center)]));
+  const selected = nodes.find((node) => node.id === selectedId) ?? null;
 
   return (
     <Screen>
@@ -58,13 +60,18 @@ export function CircleScreen() {
             <Muted>Nobody yet — meet someone in person to start your circle.</Muted>
           ) : (
             nodes.map((node) => (
-              <View key={node.id} className="flex-row items-center gap-3 rounded-l border border-line bg-paper-raised p-3.5">
-                <Avatar name={node.displayName} tone="met" />
+              <Pressable
+                key={node.id}
+                accessibilityRole="button"
+                onPress={() => setSelectedId(node.id)}
+                className="flex-row items-center gap-3 rounded-l border border-line bg-paper-raised p-3.5"
+              >
+                <Avatar name={node.displayName} photoUrl={node.photoUrl} tone="met" />
                 <View className="flex-1">
                   <Text className="font-body-semibold text-sm text-ink">{node.displayName}</Text>
                   {node.metAt ? <Muted>Met at {node.metAt}</Muted> : null}
                 </View>
-              </View>
+              </Pressable>
             ))
           )}
         </View>
@@ -96,8 +103,24 @@ export function CircleScreen() {
                 .toUpperCase();
               return (
                 <Fragment key={node.id}>
-                  <Circle cx={pos.x} cy={pos.y} r={19} fill="#FFFFFF" stroke="#20201C" strokeWidth={1.5} />
-                  <SvgText x={pos.x} y={pos.y + 4} fontSize={11} fontWeight="700" fill="#20201C" textAnchor="middle">
+                  <Circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={19}
+                    fill="#FFFFFF"
+                    stroke="#20201C"
+                    strokeWidth={1.5}
+                    onPress={() => setSelectedId(node.id)}
+                  />
+                  <SvgText
+                    x={pos.x}
+                    y={pos.y + 4}
+                    fontSize={11}
+                    fontWeight="700"
+                    fill="#20201C"
+                    textAnchor="middle"
+                    onPress={() => setSelectedId(node.id)}
+                  >
                     {initials}
                   </SvgText>
                 </Fragment>
@@ -114,6 +137,20 @@ export function CircleScreen() {
               <Muted>They also know each other</Muted>
             </View>
           </View>
+          {selected ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setSelectedId(null)}
+              className="mt-4 w-full flex-row items-center gap-3 rounded-l border border-line bg-paper-raised p-3.5"
+            >
+              <Avatar name={selected.displayName} photoUrl={selected.photoUrl} tone="met" />
+              <View className="flex-1">
+                <Text className="font-body-semibold text-sm text-ink">{selected.displayName}</Text>
+                {selected.bio ? <Muted numberOfLines={2}>{selected.bio}</Muted> : null}
+                {selected.metAt ? <Muted>Met at {selected.metAt}</Muted> : null}
+              </View>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
     </Screen>

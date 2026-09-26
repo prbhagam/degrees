@@ -26,7 +26,7 @@ function AttendeeRow({
   attendee,
   eventId,
 }: {
-  attendee: { id: string; displayName: string };
+  attendee: { id: string; displayName: string; bio: string | null; photoUrl: string | null };
   eventId: string;
 }) {
   const [result, setResult] = useState<CreateConnectionResponse | null>(null);
@@ -38,8 +38,13 @@ function AttendeeRow({
 
   return (
     <View className="flex-row items-center gap-3 py-1.5">
-      <Avatar name={attendee.displayName} tone={result ? 'met' : 'unmet'} size="sm" />
-      <Text className="flex-1 font-body text-base text-ink">{attendee.displayName}</Text>
+      <Avatar name={attendee.displayName} photoUrl={attendee.photoUrl} tone={result ? 'met' : 'unmet'} size="sm" />
+      <View className="flex-1">
+        <Text className="font-body text-base text-ink">{attendee.displayName}</Text>
+        {attendee.bio ? (
+          <Muted numberOfLines={1}>{attendee.bio}</Muted>
+        ) : null}
+      </View>
       {result ? (
         <View className="flex-row items-center gap-1">
           <Check size={16} color="#5B7A6B" />

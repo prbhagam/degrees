@@ -9,7 +9,7 @@ import {
 } from '@degrees/shared';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from './errors.js';
-import { displayNames, exploreFrom } from './graph.js';
+import { exploreFrom, profileBasics } from './graph.js';
 
 // Georgia Tech campus — used when no member has a location on file.
 const DEFAULT_CENTER = { city: 'Atlanta', lat: 33.7756, lng: -84.3963 };
@@ -111,7 +111,7 @@ export async function loadGroup(
   const ids = rows.map((row) => row.user_id);
   const db = getServiceClient();
 
-  const [groupResult, activityResult, names, tags, { reach }] =
+  const [groupResult, activityResult, basics, tags, { reach }] =
     await Promise.all([
       db
         .from('groups')
@@ -119,7 +119,7 @@ export async function loadGroup(
         .eq('id', groupId)
         .single(),
       db.from('activities').select('*').eq('group_id', groupId).limit(1),
-      displayNames(ids),
+      profileBasics(ids),
       tagsByUser(ids),
       exploreFrom(viewerId, undefined, ids),
     ]);
@@ -130,24 +130,31 @@ export async function loadGroup(
     throw new Error(`activities read failed: ${activityResult.error.message}`);
   }
 
+  const status = (groupResult.data.status as GroupStatus | null) ?? 'proposed';
   const viewerTags = new Set(
     (tags.get(viewerId) ?? []).map((label) => label.toLowerCase()),
   );
-  // CHANGED Sep 26: members past 1st degree are redacted — no id, no displayName, no `via` chain.
-  // The design goal is that you only ever see someone's identity after you've actually met them.
+  // CHANGED Sep 26: members past 1st degree are redacted — no id, no displayName, bio, or photo.
+  // The design goal is that you never browse the wider matching pool's identities. But accepting
+  // a proposed group is itself a commitment to meet, so revealed also flips true once the group
+  // leaves 'proposed' — otherwise this and ChatScreen (which needs a real sender name to
+  // coordinate) would contradict each other for the exact people you're actively meeting up with.
   const members: GroupMember[] = rows.map(({ user_id: id, degree }) => {
     const path = reach.get(id);
     // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
     const resolvedDegree = path?.degree ?? degree ?? 0;
-    const revealed = resolvedDegree <= 1;
+    const revealed = resolvedDegree <= 1 || status !== 'proposed';
     const sharedInterests =
       id === viewerId
         ? []
         : (tags.get(id) ?? []).filter((label) => viewerTags.has(label.toLowerCase()));
+    const profile = basics.get(id);
     return revealed
       ? {
           id,
-          displayName: names.get(id) ?? 'Someone',
+          displayName: profile?.displayName ?? 'Someone',
+          bio: profile?.bio ?? null,
+          photoUrl: profile?.photoUrl ?? null,
           degree: resolvedDegree,
           sharedInterests,
           revealed: true,
@@ -155,6 +162,8 @@ export async function loadGroup(
       : {
           id: null,
           displayName: null,
+          bio: null,
+          photoUrl: null,
           degree: resolvedDegree,
           sharedInterests,
           revealed: false,
@@ -166,7 +175,7 @@ export async function loadGroup(
   const activityRow = activityResult.data[0] as ActivityRow | undefined;
   return {
     id: groupResult.data.id as string,
-    status: (groupResult.data.status as GroupStatus | null) ?? 'proposed',
+    status,
     reasoning: (groupResult.data.reasoning as string | null) ?? '',
     members,
     unrevealedCount,

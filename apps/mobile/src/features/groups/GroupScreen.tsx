@@ -39,7 +39,7 @@ function MemberRow({ member, index }: { member: GroupMember; index: number }) {
   const tone = member.degree === 0 ? 'you' : member.revealed ? 'met' : 'unmet';
   return (
     <View className="flex-row gap-3 py-2" key={member.id ?? `unrevealed-${index}`}>
-      <Avatar name={name} tone={tone} locked={!member.revealed && member.degree > 0} />
+      <Avatar name={name} photoUrl={member.photoUrl} tone={tone} locked={!member.revealed && member.degree > 0} />
       <View className="flex-1 gap-1">
         <View className="flex-row flex-wrap items-center gap-2">
           <Text className="font-body-semibold text-base text-ink">{name}</Text>
@@ -48,6 +48,7 @@ function MemberRow({ member, index }: { member: GroupMember; index: number }) {
         {!member.revealed && member.degree > 0 ? (
           <Muted>You'll see who they are once you've hung out together.</Muted>
         ) : null}
+        {member.revealed && member.bio ? <Muted numberOfLines={2}>{member.bio}</Muted> : null}
         {member.sharedInterests.length > 0 ? (
           <View className="flex-row flex-wrap gap-1.5 pt-1">
             {member.sharedInterests.map((interest) => (

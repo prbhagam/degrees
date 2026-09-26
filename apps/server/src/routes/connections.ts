@@ -8,7 +8,7 @@ import {
 import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError, validateJson } from '../lib/errors.js';
-import { displayNames, exploreFrom } from '../lib/graph.js';
+import { exploreFrom, profileBasics } from '../lib/graph.js';
 import type { AppEnv } from '../middleware/auth.js';
 import { graphFixture } from '../mocks/fixtures.js';
 
@@ -93,7 +93,7 @@ export const connectionRoutes = new Hono<AppEnv>()
     const db = getServiceClient();
     const { reach, edges } = await exploreFrom(viewerId, 1);
     const neighborIds = [...reach.keys()].filter((id) => id !== viewerId);
-    const names = await displayNames(reach.keys());
+    const basics = await profileBasics(reach.keys());
 
     const { data: viewerConnections, error: connError } = await db
       .from('connections')
@@ -138,7 +138,9 @@ export const connectionRoutes = new Hono<AppEnv>()
     const response = {
       nodes: neighborIds.map((id) => ({
         id,
-        displayName: names.get(id) ?? 'Someone',
+        displayName: basics.get(id)?.displayName ?? 'Someone',
+        bio: basics.get(id)?.bio ?? null,
+        photoUrl: basics.get(id)?.photoUrl ?? null,
         metAt: eventNames.get(eventIdByNeighbor.get(id) ?? '') ?? null,
       })),
       edges: edges

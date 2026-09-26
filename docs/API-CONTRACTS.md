@@ -42,18 +42,23 @@ POST /api/connections
   // edge to the hangout both people were at; the app refuses to show a scannable code otherwise.
 
 GET  /api/graph/me
-  → { nodes: { id, displayName, metAt: string | null }[],   // CHANGED Sep 26
+  → { nodes: { id, displayName, bio: string | null, photoUrl: string | null, metAt: string | null }[],   // CHANGED Sep 26
       edges: { a: string, b: string }[],
       mutualEdges: { a: string, b: string }[] }   // CHANGED Sep 26
   // CHANGED Sep 26 — BREAKING: this ONLY ever returns 1st-degree connections (people actually
   // met). It is not a directory of the wider matching pool — that stays server-side, used only
   // by /match/run. `metAt` is the event name the connection formed at, if any. `mutualEdges` are
   // edges between two of the viewer's own connections who also know each other (for the "your
-  // friends already know each other" view).
+  // friends already know each other" view). bio/photoUrl (Added Sep 26) are safe here — every
+  // node is already 1st-degree — and back Circle's tap-a-node-to-view-profile card.
 
 // ---- Events ---------------------------------------------------------------
 POST /api/events/:roomCode/join
-  → { eventId, name, attendees: { id, displayName }[] }
+  → { eventId, name, attendees: { id, displayName, bio: string | null, photoUrl: string | null }[] }
+  // bio/photoUrl (Added Sep 26): the event lobby shows everyone present regardless of the
+  // connections graph — Charles: "when joining event, all members should be able to see name,
+  // bio, pfp." This does NOT auto-form a connection edge; that's still the explicit "We met"
+  // per attendee (POST /api/connections), which is what Circle's degree math depends on.
 
 // Added Sep 26 — host-created events (previously events could only be joined, never created).
 POST /api/events
@@ -77,9 +82,14 @@ GET  /api/groups/:id
 // until you've actually met them (an edge exists in connections) — so the server now redacts:
 type GroupMember = {
   id: string | null; displayName: string | null;
+  bio: string | null; photoUrl: string | null;   // CHANGED Sep 26, null exactly when displayName is
   degree: number;                  // 0 = you, 1 = met in person, 2+ = network (never shown as a number)
   sharedInterests: string[];       // kept even when redacted — not identifying on its own
-  revealed: boolean;               // degree <= 1. When false, id/displayName are null.
+  revealed: boolean;
+  // CHANGED Sep 26: revealed = degree <= 1 OR the group's status is no longer "proposed". Accepting
+  // a proposed group is treated as committing to meet, so a still-degree-2 groupmate becomes
+  // revealed the moment the group is confirmed — otherwise ChatScreen (which needs a real sender
+  // name) would show identity that GroupScreen was redacting for the same person.
 }
 // `via` is gone — nobody sees the chain to someone they haven't met. `unrevealedCount` on
 // GroupResponse/MatchRunResponse is the count of members with revealed: false, for "+N more
@@ -113,6 +123,9 @@ type Activity = {
 // ---- Chat -----------------------------------------------------------------
 GET  /api/groups/:id/messages?since=<iso>
   → { messages: { id, senderId, senderName, body, createdAt }[] }
+  // senderName follows the same revealed rule as GroupMember above (via lib/groups.ts's
+  // loadGroup) — "Someone" for a still-redacted sender, which in practice only applies to a
+  // 'proposed' group (chat is reachable there too, not just confirmed/completed).
 
 POST /api/groups/:id/messages
   { body: string } → { id, createdAt }

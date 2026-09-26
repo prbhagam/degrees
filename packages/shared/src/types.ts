@@ -68,7 +68,9 @@ export interface CreateConnectionResponse extends OkResponse {
 // person) — this is not a browsable directory of the wider matching pool. `mutualEdges` are edges
 // between two of the viewer's own 1st-degree connections who also know each other.
 export interface GraphResponse {
-  nodes: { id: string; displayName: string; metAt: string | null }[];
+  // CHANGED Sep 26: added bio/photoUrl for Circle's tap-to-view-profile — safe to include because
+  // every node here is already a 1st-degree connection (exploreFrom(viewerId, 1)), never a stranger.
+  nodes: { id: string; displayName: string; bio: string | null; photoUrl: string | null; metAt: string | null }[];
   edges: { a: string; b: string }[];
   mutualEdges: { a: string; b: string }[];
 }
@@ -76,7 +78,10 @@ export interface GraphResponse {
 export interface JoinEventResponse {
   eventId: string;
   name: string;
-  attendees: { id: string; displayName: string }[];
+  // CHANGED Sep 26: bio/photoUrl added — the event lobby shows everyone present, not gated on the
+  // connections graph. This does not itself form a connection edge; that's still the explicit
+  // "We met" action per attendee (JoinRoomScreen / POST /connections).
+  attendees: { id: string; displayName: string; bio: string | null; photoUrl: string | null }[];
 }
 
 // CHANGED Sep 26 — BREAKING: previously every member's real displayName + a `via` chain was sent
@@ -88,8 +93,17 @@ export interface JoinEventResponse {
 export interface GroupMember {
   id: string | null;
   displayName: string | null;
+  // CHANGED Sep 26: bio/photoUrl for the "basic info" the design calls for once a group is
+  // confirmed (see `revealed`'s doc below) — null whenever displayName is null.
+  bio: string | null;
+  photoUrl: string | null;
   degree: number;
   sharedInterests: string[];
+  // CHANGED Sep 26: revealed is no longer purely graph-degree. Accepting into a group is itself
+  // treated as committing to meet, so revealed is also true once the group leaves 'proposed' —
+  // otherwise GroupScreen and ChatScreen would show a real name to people who haven't met while
+  // the match is still a live proposal (the actual thing the redaction rule protects), then
+  // contradict each other once you're both chatting to coordinate a meetup you already agreed to.
   revealed: boolean;
 }
 

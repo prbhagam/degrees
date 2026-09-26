@@ -11,7 +11,7 @@ import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError, validateJson } from '../lib/errors.js';
 import { displayNames } from '../lib/graph.js';
-import { groupNotFound, memberRows } from '../lib/groups.js';
+import { groupNotFound, loadGroup, memberRows } from '../lib/groups.js';
 import type { AppEnv } from '../middleware/auth.js';
 import {
   DEMO_GROUP_ID,
@@ -70,7 +70,13 @@ export const messageRoutes = new Hono<AppEnv>()
       return context.json(response);
     }
 
-    await memberRows(groupId, context.get('userId'));
+    // CHANGED Sep 26: senderName is gated by the same `revealed` rule as GroupScreen (loadGroup),
+    // not a plain lookup — otherwise a still-proposed groupmate past 1st degree would show a real
+    // name here despite being redacted everywhere else.
+    const group = await loadGroup(groupId, context.get('userId'));
+    const revealedIds = new Set(
+      group.members.filter((member) => member.revealed).map((member) => member.id),
+    );
     let query = getServiceClient()
       .from('messages')
       .select('id, sender_id, body, created_at')
@@ -85,17 +91,24 @@ export const messageRoutes = new Hono<AppEnv>()
       throw new Error(`messages read failed: ${error.message}`);
     }
     const names = await displayNames(
-      data.map((row) => row.sender_id as string),
+      data
+        .map((row) => row.sender_id as string)
+        .filter((id) => revealedIds.has(id)),
     );
     const response = {
       // Newest PAGE_SIZE, returned oldest first.
-      messages: data.reverse().map((row) => ({
-        id: String(row.id),
-        senderId: row.sender_id as string,
-        senderName: names.get(row.sender_id as string) ?? 'Someone',
-        body: row.body as string,
-        createdAt: new Date(row.created_at as string).toISOString(),
-      })),
+      messages: data.reverse().map((row) => {
+        const senderId = row.sender_id as string;
+        return {
+          id: String(row.id),
+          senderId,
+          senderName: revealedIds.has(senderId)
+            ? names.get(senderId) ?? 'Someone'
+            : 'Someone',
+          body: row.body as string,
+          createdAt: new Date(row.created_at as string).toISOString(),
+        };
+      }),
     } satisfies MessagesResponse;
     return context.json(response);
   })
