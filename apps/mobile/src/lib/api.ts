@@ -1,6 +1,7 @@
 // Owner: shared mobile scaffold (Christian merges contract changes) — keep helpers in docs/API-CONTRACTS.md order.
 import type {
   Activity,
+  ActivityJobResponse,
   ApiErrorBody,
   CreateConnectionRequest,
   CreateConnectionResponse,
@@ -151,8 +152,11 @@ export const api = {
   getGroup: (id: string) => request<GroupResponse>(groupPath(id)),
   respondToGroup: (id: string, accept: boolean) =>
     request<OkResponse>(`${groupPath(id)}/respond`, json('POST', { accept })),
+  // Starts the plan job (returns a 'generating' placeholder); useActivityJob drives it with advanceActivity.
   generateActivity: (id: string) =>
     request<Activity>(`${groupPath(id)}/activity`, { method: 'POST' }),
+  advanceActivity: (id: string) =>
+    request<ActivityJobResponse>(`${groupPath(id)}/activity/advance`, { method: 'POST' }),
   getMessages: (id: string, since?: string) =>
     request<MessagesResponse>(
       `${groupPath(id)}/messages${since ? `?since=${encodeURIComponent(since)}` : ''}`,

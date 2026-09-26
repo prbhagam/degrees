@@ -27,6 +27,7 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { formatPrice, formatStartsAt } from './format';
+import { useActivityJob } from './useActivityJob';
 
 function directionsUrl(activity: Activity): string {
   const query = new URLSearchParams({
@@ -156,10 +157,10 @@ export function ActivityScreen() {
   });
 
   const activity = group.data?.activity ?? null;
-  const isGenerating =
-    generate.isPending ||
-    activity?.status === 'generating' ||
-    group.data?.activityStatus === 'generating';
+  const jobRunning = activity?.status === 'generating' || group.data?.activityStatus === 'generating';
+  const isGenerating = generate.isPending || jobRunning;
+  // Wave 2: the server only starts the job; this hook advances it stage by stage (see useActivityJob).
+  const job = useActivityJob(id, Boolean(jobRunning));
 
   return (
     <Screen>
@@ -182,7 +183,14 @@ export function ActivityScreen() {
             Degrees AI is curating a real hangout plan with Google Maps based on
             group interests, location, and budgets.
           </Body>
-          <LoadingState label="Generating your plan…" />
+          {job.stalled ? (
+            <>
+              <Muted>Lost the connection while planning.</Muted>
+              <Button label="Keep going" variant="secondary" onPress={job.retry} />
+            </>
+          ) : (
+            <LoadingState label="Generating your plan…" />
+          )}
         </Card>
       ) : null}
 

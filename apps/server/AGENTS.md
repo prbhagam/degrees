@@ -30,8 +30,7 @@ src/routes/*.ts          one Hono sub-app per contract area: me, profile, prefer
 src/ai/                  Gemini wrapper + the AI calls (wave 2 adds generateIcebreakers) + the global rate limiter — see src/ai/AGENTS.md
 src/matching/            Sahith's pipeline — see src/matching/AGENTS.md
 src/mocks/fixtures.ts    the coherent mock world every stub returns (Atlanta, HackGT, demo group)
-netlify/functions/       api.ts (Hono router) + activity-background.ts (async activity generation; only used when
-                         ACTIVITY_BACKGROUND=true — Background Functions need a Pro+ plan and the account is legacy)
+netlify/functions/       api.ts (Hono router). No background functions: the account is a legacy plan.
 ```
 
 ## Mock mode vs real mode
@@ -58,7 +57,7 @@ When a route goes real, replace its fixture return with the real query but keep 
 
 ## Deployed
 
-Production is **`https://degrees-api.netlify.app`** (Netlify Functions, real mode; `netlify.toml` routes `/api/*` and `/health` to the function). A merge to `main` doesn't deploy by itself — redeploy after merging server changes (PR #14 + migration `0006` went live together on Sep 26). **The account is a legacy Netlify plan:** every request must finish inside the 10s synchronous limit (the `timeout` key can't raise it) and Background Functions aren't available, so `POST /groups/:id/activity` generates inline by default (`ACTIVITY_BACKGROUND` unset). Match and activity measured ~2.8s on Sep 26. Functions use the modern default-export API (`api.ts`, `activity-background.ts`) — the legacy `export const handler` form fails at init under `"type": "module"`.
+Production is **`https://degrees-api.netlify.app`** (Netlify Functions, real mode; `netlify.toml` routes `/api/*` and `/health` to the function). A merge to `main` doesn't deploy by itself — redeploy after merging server changes (PR #14 + migration `0006` went live together on Sep 26). **The account is a legacy Netlify plan:** every request must finish inside the 10s synchronous limit (the `timeout` key can't raise it) and Background Functions aren't available. Long AI work therefore runs as a **resumable job**: `POST /groups/:id/activity` starts it and each `POST /groups/:id/activity/advance` runs one stage (`ai/generateActivity.ts` `runActivityStage`, 7.5s budget, per-stage lock in `activities.job`); the app drives the advances (`features/activity/useActivityJob.ts`). Use the same pattern for any future call chain that can't fit one request. Functions use the modern default-export API — the legacy `export const handler` form fails at init under `"type": "module"`.
 
 ## Running it
 

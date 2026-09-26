@@ -98,6 +98,9 @@ groups (
   completed_at  timestamptz        -- CHANGED Sep 26: chat + photos go read-only 24h after this
 )
 
+-- wave 2: activities also carries `status` ('generating' | 'ready' | 'failed', migration 0008) and `job` jsonb
+-- (migration 0009) — the resumable stage state of a plan being generated one function call at a time.
+
 -- wave 2: Gemini-written conversation starters, one ordered set per group (regenerating replaces it)
 group_icebreakers (
   id            uuid primary key,

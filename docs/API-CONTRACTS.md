@@ -149,8 +149,22 @@ POST /api/groups/:id/icebreakers
   → { icebreakers: string[] }
 
 // ---- Activity -------------------------------------------------------------
+// CHANGED Sep 26 (wave 2, legacy Netlify plan): plan generation is a resumable job. The chain (Gemini with Maps
+// grounding → Places → Ticketmaster fallback → fixture) can't fit one 10s function and Background Functions aren't
+// on the team's plan, so POST /activity only STARTS the job and returns a placeholder Activity with status
+// 'generating' (GroupResponse.activityStatus = 'generating'). The app then calls /advance until it's 'ready';
+// each advance runs exactly one external call inside its own function budget, and the last one writes the plan.
+// Any member's device can advance; an abandoned job resumes when the group is next opened; a fresh running job
+// is not restarted by a second POST /activity.
 POST /api/groups/:id/activity
-  → Activity
+  → Activity                     // status 'generating' until the job finishes (mock mode: the finished plan)
+
+POST /api/groups/:id/activity/advance
+  → { status: "generating"|"ready"|"failed",
+      stage: "grounded"|"grounded_lite"|"places"|"ticketmaster"|"fixture" | null,   // what runs next
+      activity: Activity | null }  // the plan once status is 'ready'
+  // 404 activity_not_found before any POST /activity. A concurrent advance returns status 'generating' with
+  // the current stage and does no work (the running one holds a short lock).
 
 type Activity = {
   title: string; venue: string; address: string;

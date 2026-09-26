@@ -7,13 +7,14 @@ import {
   type Activity,
   type ExchangeResponse,
   type GenerateActivityInput,
+  type ActivityJobResponse,
   type GroupResponse,
   type IcebreakersResponse,
   type OkResponse,
   type Photo,
   type PhotosResponse,
 } from '@degrees/shared';
-import { generateActivity } from '../ai/generateActivity.js';
+import { generateActivity, newActivityJob, runActivityStage } from '../ai/generateActivity.js';
 import { generateIcebreakers } from '../ai/generateIcebreakers.js';
 import { env } from '../config/env.js';
 import { ApiError, validateJson } from '../lib/errors.js';
@@ -26,12 +27,14 @@ import {
   icebreakersInput,
   isArchived,
   leaveGroup,
+  loadActivityJob,
   loadGroup,
   meetupForGroup,
   memberRows,
   saveActivity,
   saveIcebreakers,
   setActivityGenerating,
+  updateActivityJob,
 } from '../lib/groups.js';
 import { log, timed } from '../lib/log.js';
 import type { AppEnv } from '../middleware/auth.js';
@@ -41,6 +44,14 @@ import { getServiceClient } from '../db/supabase.js';
 // Signed read URLs for the private event-photos bucket; long enough to browse an album, short enough that a
 // leaked link goes stale.
 const PHOTO_URL_TTL_SECONDS = 60 * 60;
+
+// One plan-job stage per /advance call: 7.5s of external work leaves room for the DB reads/writes around it
+// inside Netlify's 10s synchronous limit. The lock stops a concurrent poll from running the same stage.
+const STAGE_BUDGET_MS = 7_500;
+const STAGE_LOCK_MS = 9_500;
+// A 'generating' job untouched for this long is abandoned; a new "Plan something" restarts it.
+const JOB_FRESH_MS = 2 * 60 * 1000;
+const isFresh = (updatedAt: string) => Date.now() - new Date(updatedAt).getTime() < JOB_FRESH_MS;
 export const PHOTO_BUCKET = 'event-photos';
 
 const mockActivityInput = {
@@ -235,51 +246,68 @@ export const groupRoutes = new Hono<AppEnv>()
     }
     await memberRows(groupId, userId);
 
-    // Default (legacy Netlify plan, no Background Functions, 10s function limit): generate inside the request.
-    // generateActivity's own 9s budget keeps it under the limit and it never hard-fails (fixture last).
-    if (!env.activityBackground) {
-      const input = await activityInput(groupId, userId);
-      const response: Activity = await timed('ai.activity', { groupId, mode: 'inline' }, () =>
-        generateActivity(input),
-      );
-      await saveActivity(groupId, { ...response, status: 'ready' }, 'ready');
+    // Wave 2 (legacy Netlify plan: 10s functions, no Background Functions): this only STARTS the job. It writes a
+    // 'generating' placeholder with job.stage = 'grounded' and returns at once. The app then calls
+    // POST /groups/:id/activity/advance repeatedly; each advance runs one external call inside its own budget and
+    // the last one writes the plan. A fresh job that's already running isn't restarted by a double tap.
+    const existing = await loadActivityJob(groupId);
+    if (existing?.status === 'generating' && existing.job && isFresh(existing.job.updatedAt)) {
+      const response: Activity = existing.activity ?? (await setActivityGenerating(groupId, existing.job));
       return context.json(response);
     }
-
-    // ACTIVITY_BACKGROUND=true (Christian, PR #22): answer in <100ms with a 'generating' placeholder, then
-    // generate off the request path — a Netlify Background Function in production (up to 15 min), an
-    // un-awaited task in local dev. The app subscribes to `activities` and polls every 2s until the row flips
-    // to 'ready' (features/groups/queries.ts).
-    const placeholder = await setActivityGenerating(groupId);
-    const isNetlify = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
-    if (isNetlify) {
-      const netlifyUrl = process.env.URL || 'https://degrees-api.netlify.app';
-      fetch(`${netlifyUrl}/.netlify/functions/activity-background`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groupId, userId }),
-      })
-        .then((response) => {
-          // 202 = accepted as a background function. Anything else means the plan ran it synchronously (or not
-          // at all); the row stays 'generating', so the app keeps polling — set ACTIVITY_BACKGROUND=false.
-          log.info('activity.background.invoked', { groupId, userId, status: response.status });
-        })
-        .catch((error: unknown) => {
-          log.error('activity.background.invoke_failed', error, { groupId, userId });
-        });
-    } else {
-      void (async () => {
-        try {
-          const input = await activityInput(groupId, userId);
-          const activity = await timed('ai.activity', { groupId, mode: 'background' }, () => generateActivity(input));
-          await saveActivity(groupId, activity, 'ready');
-        } catch (error) {
-          log.error('activity.background.local_failed', error, { groupId, userId });
-        }
-      })();
-    }
-
+    const placeholder = await setActivityGenerating(groupId, newActivityJob());
+    log.info('activity.job.started', { groupId, userId });
     return context.json(placeholder);
+  })
+  // Added Sep 26 (wave 2): run ONE stage of the group's plan job (see ai/generateActivity.ts). Safe to call any
+  // time: a finished job just returns the plan, a concurrent advance returns the current state without working.
+  .post('/groups/:id/activity/advance', async (context) => {
+    const groupId = context.req.param('id');
+    const userId = context.get('userId');
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      const response = {
+        status: 'ready',
+        stage: null,
+        activity: mockActivity,
+      } satisfies ActivityJobResponse;
+      return context.json(response);
+    }
+    await memberRows(groupId, userId);
+    const current = await loadActivityJob(groupId);
+    if (!current) {
+      throw new ApiError(404, 'activity_not_found', 'Start a plan first.');
+    }
+    if (current.status !== 'generating') {
+      const response = { status: current.status, stage: null, activity: current.activity } satisfies ActivityJobResponse;
+      return context.json(response);
+    }
+    // No parseable job on a generating row (a row written by an older server): restart from the first stage.
+    const job = current.job ?? newActivityJob();
+    const now = Date.now();
+    if (job.lockedUntil && new Date(job.lockedUntil).getTime() > now) {
+      const response = { status: 'generating', stage: job.stage, activity: null } satisfies ActivityJobResponse;
+      return context.json(response);
+    }
+    // Claim the stage for this invocation. The lock outlives the stage budget slightly so a second poll that
+    // arrives mid-stage waits for the next one instead of running the same call twice.
+    const locked = { ...job, lockedUntil: new Date(now + STAGE_LOCK_MS).toISOString() };
+    await updateActivityJob(current.id, { job: locked });
+
+    const input = await activityInput(groupId, userId);
+    const result = await timed('ai.activity.stage', { groupId, stage: job.stage }, () =>
+      runActivityStage(job, input, STAGE_BUDGET_MS),
+    );
+    if (result.activity) {
+      await saveActivity(groupId, result.activity, 'ready', null);
+      log.info('activity.job.ready', { groupId, userId, source: result.activity.source, stages: result.job.errors.length + 1 });
+      const response = { status: 'ready', stage: null, activity: result.activity } satisfies ActivityJobResponse;
+      return context.json(response);
+    }
+    const { lockedUntil: _unlocked, ...next } = result.job;
+    await updateActivityJob(current.id, { job: next });
+    const response = { status: 'generating', stage: next.stage, activity: null } satisfies ActivityJobResponse;
+    return context.json(response);
   })
   .post('/groups/:id/complete', async (context) => {
     const groupId = context.req.param('id');
