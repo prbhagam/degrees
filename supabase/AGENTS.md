@@ -3,9 +3,12 @@
 Schema, row-level security, and seed data for Supabase Postgres + pgvector. **Owner:** Sahith. The source of truth for the schema is [docs/DATA-MODEL.md](../docs/DATA-MODEL.md). The migration implements it, and its header lists every addition beyond the doc.
 
 ```
-migrations/0001_init.sql   full schema, indexes, RLS, grants, Realtime publication
-seed/seed.ts               seed shell (TODO). Run with `npm run seed` from the repo root.
-tsconfig.json              lets `npm run typecheck` cover seed.ts
+migrations/0001_init.sql                 full schema, indexes, RLS, grants, Realtime publication
+migrations/0002_seed_georgia_tech_demo.sql  canonical demo seed (12 GT students, graph, 2 completed groups, HACKGT)
+migrations/0003_matching_functions.sql   matching RPCs (match_traverse, match_narrow, match_create_group), service-role only
+seed/seed.ts                             replaces 0002's placeholder vectors with real Gemini embeddings (`npm run seed`)
+tests/run-local.sh + matching.sql        0001 + 0003 on a throwaway local Postgres with assertions
+tsconfig.json                            lets `npm run typecheck` cover seed.ts
 ```
 
 **No Edge Functions.** There is no `supabase/functions/` folder, and there won't be one. All server logic lives in `apps/server`.
@@ -29,6 +32,14 @@ tsconfig.json              lets `npm run typecheck` cover seed.ts
 Add a **new** numbered migration (`0002_…sql`). Never edit `0001` once it has been applied to the shared project. If a column change affects an API shape, update `packages/shared` and `docs/API-CONTRACTS.md` in the same PR.
 
 To test locally without the Supabase CLI, apply the migration to a throwaway Postgres with a small shim: an `auth` schema, `auth.users`, `auth.uid()`, the `anon` and `authenticated` roles, and a `supabase_realtime` publication. pgvector isn't installed via Homebrew by default, so stub the vector column or install the extension.
+
+## Seeding the shared project
+
+1. Apply `0002` (already done on the shared project), then `0003`.
+2. `npm run seed` — re-embeds every profile with Gemini (`gemini-embedding-001`, 768 dims, `SEMANTIC_SIMILARITY`).
+   Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY` in the root `.env`. Safe to rerun.
+
+Demo logins are `<username>@degrees.demo` / `DegreesDemo26!`. The app's signup must build emails the same way.
 
 ## Seed requirements (from DATA-MODEL.md)
 
