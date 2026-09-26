@@ -49,6 +49,51 @@ export async function memberRows(
   return rows;
 }
 
+// Chat and photo uploads close this long after a hangout is marked done (the app hides the
+// composer at the same mark; this is the server-side half).
+export const ARCHIVE_GRACE_MS = 24 * 60 * 60 * 1000;
+
+export interface GroupState {
+  status: GroupStatus;
+  completedAt: string | null;
+}
+
+export async function groupState(groupId: string): Promise<GroupState> {
+  const { data, error } = await getServiceClient()
+    .from('groups')
+    .select('status, completed_at')
+    .eq('id', groupId)
+    .single();
+  if (error) {
+    throw new Error(`groups read failed: ${error.message}`);
+  }
+  return {
+    status: (data.status as GroupStatus | null) ?? 'proposed',
+    completedAt: (data.completed_at as string | null) ?? null,
+  };
+}
+
+export function isArchived(
+  completedAt: string | null,
+  now = Date.now(),
+): boolean {
+  return (
+    completedAt !== null &&
+    now - new Date(completedAt).getTime() > ARCHIVE_GRACE_MS
+  );
+}
+
+export async function assertNotArchived(groupId: string): Promise<void> {
+  const { completedAt } = await groupState(groupId);
+  if (isArchived(completedAt)) {
+    throw new ApiError(
+      403,
+      'hangout_archived',
+      'This hangout ended more than 24 hours ago, so it is read-only now.',
+    );
+  }
+}
+
 async function tagsByUser(ids: string[]): Promise<Map<string, string[]>> {
   const { data, error } = await getServiceClient()
     .from('profile_tags')
@@ -147,7 +192,9 @@ export async function loadGroup(
     const sharedInterests =
       id === viewerId
         ? []
-        : (tags.get(id) ?? []).filter((label) => viewerTags.has(label.toLowerCase()));
+        : (tags.get(id) ?? []).filter((label) =>
+            viewerTags.has(label.toLowerCase()),
+          );
     const profile = basics.get(id);
     return revealed
       ? {

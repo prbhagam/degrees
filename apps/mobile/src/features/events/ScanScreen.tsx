@@ -4,6 +4,7 @@ import { Stack, useRouter } from 'expo-router';
 import { useRef, useState } from 'react';
 import { Text, View } from 'react-native';
 import { Body, Button, Card, Screen } from '@/components/ui';
+import { useSessionStore } from '@/stores/session';
 import { parseScan } from './links';
 
 const FRAME = 260;
@@ -12,6 +13,7 @@ export function ScanScreen() {
   const router = useRouter();
   const [permission, requestPermission] = useCameraPermissions();
   const [unrecognized, setUnrecognized] = useState(false);
+  const activeEvent = useSessionStore((state) => state.activeEvent);
   // The camera fires many callbacks per second; act on the first good code only.
   const handled = useRef(false);
 
@@ -72,11 +74,20 @@ export function ScanScreen() {
               params: { roomCode: target.roomCode },
             });
           } else {
+            // Every edge must carry the event both people are at. Prefer the one embedded in their
+            // code; if it has none, you're scanning them in person, so the event you joined is it.
+            const event = target.eventId
+              ? { id: target.eventId, name: target.eventName }
+              : activeEvent
+                ? { id: activeEvent.id, name: activeEvent.name }
+                : null;
             router.replace({
               pathname: '/connect/[peerId]',
               params: {
                 peerId: target.peerId,
                 ...(target.name ? { name: target.name } : {}),
+                ...(event ? { eventId: event.id } : {}),
+                ...(event?.name ? { eventName: event.name } : {}),
               },
             });
           }

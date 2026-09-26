@@ -108,7 +108,6 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 
 Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
 - **Signup** takes an email (no username) and never creates a `profiles` row; a real new account can't use the app yet.
-- **ScanScreen** drops `eventId`/`eventName` when routing a person QR to `connect/[peerId]`, so in-app scans always hit "missing event".
 - **Photos** post a placeholder path (`demo/<ts>.jpg`); no image picker or Storage upload yet, and no bucket exists.
 - **Notifications** do a one-shot select (no Realtime, no mark-read), and nothing writes rows yet.
 - **Feedback**: the "(demo: they said yes)" link only re-marks your own side, the peer has no UI to see an incoming exchange request, and the group-tag chips are never sent.

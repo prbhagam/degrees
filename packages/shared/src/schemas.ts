@@ -11,7 +11,11 @@ export const frequencySchema = z.enum([
   'biweekly',
   'monthly',
 ]);
-export const feedbackRelationshipSchema = z.enum(['great', 'fine', 'not_for_me']);
+export const feedbackRelationshipSchema = z.enum([
+  'great',
+  'fine',
+  'not_for_me',
+]);
 export const connectionContextSchema = z.enum([
   'qr',
   'event',
@@ -113,6 +117,12 @@ export const createEventRequestSchema = z.object({
 
 export const exchangeRequestSchema = z.object({
   peerId: z.uuid(),
+});
+
+// Added Sep 26 (Pranav): POST /groups/:id/photos had no request schema. The client uploads to
+// Storage first, then posts the object path; the server never takes image bytes.
+export const addPhotoRequestSchema = z.object({
+  storagePath: z.string().trim().min(1).max(512),
 });
 
 // A proposed group ('status: proposed') needs a real way to say no — previously there was none.
