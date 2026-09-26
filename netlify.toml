@@ -7,7 +7,7 @@
   node_bundler = "esbuild"
   included_files = ["packages/shared/**", "apps/server/**"]
   # No `timeout` override: the account is on a legacy plan (10s synchronous limit, no Background Functions).
-  # generateActivity keeps itself inside 9s; set ACTIVITY_BACKGROUND=true only on a plan that allows both.
+  # Long AI work runs as a resumable job, one external call per request — see apps/server/src/ai/generateActivity.ts.
 
 [[redirects]]
   from = "/api/*"

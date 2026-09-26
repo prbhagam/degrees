@@ -24,6 +24,7 @@ import { useEffect, useState } from 'react';
 import { Alert, Pressable, RefreshControl, Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { formatPrice, formatStartsAt } from '@/features/activity/format';
+import { useActivityJob } from '@/features/activity/useActivityJob';
 import { joinLink } from '@/features/events/links';
 import { api } from '@/lib/api';
 import { useSessionStore } from '@/stores/session';
@@ -234,6 +235,8 @@ export function GroupScreen() {
 
   const group = useGroup(id, { live: true });
   const data = group.data;
+  // Wave 2: keeps a plan job advancing while this screen is open (see features/activity/useActivityJob).
+  useActivityJob(id, data?.activityStatus === 'generating' || data?.activity?.status === 'generating');
   const isMeetup = data?.kind === 'meetup';
   const isInvited = data?.status === 'proposed' && !isMeetup;
   const isCompleted = Boolean(data?.completedAt);

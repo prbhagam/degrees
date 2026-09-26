@@ -167,6 +167,16 @@ export interface MatchRunResponse {
 export type Activity = z.infer<typeof activitySchema>;
 export type ActivityStatus = 'generating' | 'ready' | 'failed';
 
+// Added Sep 26 (wave 2, legacy Netlify plan): plan generation is a resumable job of single-call stages, each run by
+// one POST /groups/:id/activity/advance inside its own function budget. `stage` is what runs on the next advance.
+export type ActivityJobStage = 'grounded' | 'grounded_lite' | 'places' | 'ticketmaster' | 'fixture';
+
+export interface ActivityJobResponse {
+  status: ActivityStatus;
+  stage: ActivityJobStage | null;
+  activity: Activity | null;
+}
+
 export interface GroupResponse {
   id: string;
   status: GroupStatus;

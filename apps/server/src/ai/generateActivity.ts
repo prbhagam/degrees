@@ -1,10 +1,26 @@
 // Owner: Pranav (Groups, Activities & Chat) — Gemini + Maps grounding, with Ticketmaster as the secondary source.
 // Maps grounding names the venue and returns its place id; Places (New) supplies coordinates, address, and price,
 // which grounding alone does not. Every step degrades to the next source so a demo never hard-fails.
+//
+// CHANGED Sep 26 (wave 2, Sahith): the chain also runs as a RESUMABLE JOB, one external call per function
+// invocation, because the team's Netlify plan caps synchronous functions at 10s and has no Background Functions.
+// `runActivityStage()` advances a job by exactly one stage inside the budget it's given; routes/groups.ts stores
+// the intermediate result between calls and the app calls /advance until the plan is ready:
+//
+//   grounded (Flash) ──fail──▶ grounded_lite ──fail──▶ ticketmaster ──fail──▶ fixture
+//        │ ok                        │ ok                  │ ok
+//        ▼                           ▼                     ▼
+//      places  ── no location ──▶ ticketmaster           done
+//        │ ok
+//        ▼
+//       done
+//
+// `generateActivity()` (the whole chain in one 9s budget) remains for mock mode and tests.
 import { z } from 'zod';
 import {
   activitySchema,
   type Activity,
+  type ActivityJobStage,
   type GenerateActivityInput,
 } from '@degrees/shared';
 import { env } from '../config/env.js';
@@ -17,6 +33,7 @@ import {
   upcomingEventsNear,
   type TicketedEvent,
 } from '../external/ticketmaster.js';
+import { log } from '../lib/log.js';
 import { activityFixture } from '../mocks/fixtures.js';
 import { FLASH_LITE_MODEL, FLASH_MODEL, getAiClient } from './client.js';
 
@@ -56,7 +73,33 @@ const groundedPlanSchema = z.object({
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),
 });
-type GroundedPlan = z.infer<typeof groundedPlanSchema>;
+export type GroundedPlan = z.infer<typeof groundedPlanSchema>;
+
+const citedPlaceSchema = z.object({
+  title: z.string(),
+  placeId: z.string().nullable(),
+  uri: z.string().nullable(),
+});
+export type CitedPlace = z.infer<typeof citedPlaceSchema>;
+
+// The job row stored in activities.job between advances. Validated on read so a hand-edited or stale row can't
+// crash the route — an unparseable job restarts from the first stage.
+export const activityJobSchema = z.object({
+  stage: z.enum(['grounded', 'grounded_lite', 'places', 'ticketmaster', 'fixture']),
+  plan: groundedPlanSchema.optional(),
+  places: z.array(citedPlaceSchema).optional(),
+  startedAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+  // Set while an advance is running so a concurrent poll returns the current state instead of doing the work twice.
+  lockedUntil: z.iso.datetime().optional(),
+  errors: z.array(z.string()).default([]),
+});
+export type ActivityJob = z.infer<typeof activityJobSchema>;
+
+export function newActivityJob(now = new Date()): ActivityJob {
+  const iso = now.toISOString();
+  return { stage: 'grounded', startedAt: iso, updatedAt: iso, errors: [] };
+}
 
 const eventPickSchema = z.object({
   index: z.number().int().nonnegative(),
@@ -122,21 +165,17 @@ function extractJson(text: string): unknown {
   return JSON.parse(text.slice(start, end + 1));
 }
 
-async function groundedPlan(
+// One grounded Gemini call with one model. The stage runner calls this directly (Flash on one advance, Lite on
+// the next); the single-budget path wraps it in withModelFallback.
+async function groundedPlanWith(
+  model: string,
   input: GenerateActivityInput,
-  budget: Budget,
-): Promise<{
-  plan: GroundedPlan;
-  places: { title: string; placeId: string | null; uri: string | null }[];
-}> {
+  abortSignal: AbortSignal,
+): Promise<{ plan: GroundedPlan; places: CitedPlace[] }> {
   const { lat, lng } = input.constraints;
-  const response = await withModelFallback(
-    budget,
-    TICKETMASTER_RESERVE_MS,
-    (model, abortSignal) =>
-      getAiClient().models.generateContent({
-        model,
-        contents: `You plan real-world hangouts for small groups of college students who want to become friends.
+  const response = await getAiClient().models.generateContent({
+    model,
+    contents: `You plan real-world hangouts for small groups of college students who want to become friends.
 
 ${describeGroup(input)}
 
@@ -144,15 +183,14 @@ Use Google Maps to choose ONE real, currently open venue for a low-pressure acti
 
 Reply with only a JSON object, no prose:
 {"venue": "<exact Google Maps name of the venue>", "title": "<short plan title, e.g. 'Bouldering + tacos after'>", "estimatedPricePerPersonUsd": <number or null>, "reasoning": "<one or two friendly sentences naming which members' interests this fits>", "address": "<street address>", "lat": <number>, "lng": <number>}`,
-        config: {
-          tools: [{ googleMaps: {} }],
-          toolConfig: {
-            retrievalConfig: { latLng: { latitude: lat, longitude: lng } },
-          },
-          abortSignal,
-        },
-      }),
-  );
+    config: {
+      tools: [{ googleMaps: {} }],
+      toolConfig: {
+        retrievalConfig: { latLng: { latitude: lat, longitude: lng } },
+      },
+      abortSignal,
+    },
+  });
   const plan = groundedPlanSchema.parse(extractJson(response.text ?? ''));
   const places = (
     response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []
@@ -171,11 +209,23 @@ Reply with only a JSON object, no prose:
   return { plan, places };
 }
 
-async function fromMaps(
+async function groundedPlan(
   input: GenerateActivityInput,
   budget: Budget,
+): Promise<{ plan: GroundedPlan; places: CitedPlace[] }> {
+  return withModelFallback(budget, TICKETMASTER_RESERVE_MS, (model, abortSignal) =>
+    groundedPlanWith(model, input, abortSignal),
+  );
+}
+
+// Turn a grounded plan into a full Activity: resolve the cited place through Places (New) for coordinates,
+// address, and price, else accept the model's own coordinates if they're sane. Throws when there's no location.
+async function assembleFromMaps(
+  input: GenerateActivityInput,
+  plan: GroundedPlan,
+  places: CitedPlace[],
+  placesTimeoutMs: number,
 ): Promise<Activity> {
-  const { plan, places } = await groundedPlan(input, budget);
   const center = input.constraints;
   // Names drift between the reply and the citation ("Your 3rd Spot" vs "Your 3rd Spot - Westside"), so compare
   // loosely; a lone citation is the venue.
@@ -195,7 +245,6 @@ async function fromMaps(
 
   let place: PlaceInfo | null = null;
   try {
-    const placesTimeoutMs = budget(TICKETMASTER_RESERVE_MS);
     place = cited?.placeId
       ? await placeDetails(cited.placeId, placesTimeoutMs)
       : await searchPlace(
@@ -241,6 +290,14 @@ async function fromMaps(
     sourceUrl: place?.mapsUri ?? cited?.uri ?? null,
     reasoning: plan.reasoning,
   });
+}
+
+async function fromMaps(
+  input: GenerateActivityInput,
+  budget: Budget,
+): Promise<Activity> {
+  const { plan, places } = await groundedPlan(input, budget);
+  return assembleFromMaps(input, plan, places, budget(TICKETMASTER_RESERVE_MS));
 }
 
 async function pickEvent(
@@ -329,6 +386,7 @@ async function fromTicketmaster(
   });
 }
 
+// The whole chain inside one budget — mock mode, tests, and anything that can afford to wait.
 export async function generateActivity(
   input: GenerateActivityInput,
 ): Promise<Activity> {
@@ -353,4 +411,75 @@ export async function generateActivity(
     );
   }
   return activityFixture;
+}
+
+export interface StageResult {
+  job: ActivityJob;
+  // Non-null exactly when the job has finished: the plan to save as 'ready'.
+  activity: Activity | null;
+}
+
+const NEXT_ON_FAILURE: Record<ActivityJobStage, ActivityJobStage> = {
+  grounded: 'grounded_lite',
+  grounded_lite: 'ticketmaster',
+  places: 'ticketmaster',
+  ticketmaster: 'fixture',
+  fixture: 'fixture',
+};
+
+// Advance a job by exactly one stage — one external call (or one Places lookup) inside `budgetMs`, which the
+// caller sizes to fit a single function invocation. Never throws: a failed stage records the error and moves the
+// job to the next fallback; the 'fixture' stage always completes.
+export async function runActivityStage(
+  job: ActivityJob,
+  input: GenerateActivityInput,
+  budgetMs: number,
+): Promise<StageResult> {
+  const budget = makeBudget(budgetMs);
+  const now = () => new Date().toISOString();
+  const stage = job.stage;
+  const fail = (error: unknown): StageResult => {
+    const message = error instanceof Error ? error.message : String(error);
+    log.warn('activity.stage.failed', { stage, next: NEXT_ON_FAILURE[stage], message });
+    return {
+      job: {
+        ...job,
+        stage: NEXT_ON_FAILURE[stage],
+        updatedAt: now(),
+        errors: [...job.errors, `${stage}: ${message}`].slice(-8),
+      },
+      activity: null,
+    };
+  };
+
+  // Only the grounded stages need Gemini; Places and Ticketmaster have their own keys and their own failures.
+  if (!env.geminiApiKey && (stage === 'grounded' || stage === 'grounded_lite')) {
+    return { job: { ...job, stage: 'fixture', updatedAt: now() }, activity: null };
+  }
+
+  try {
+    switch (stage) {
+      case 'grounded':
+      case 'grounded_lite': {
+        const model = stage === 'grounded' ? FLASH_MODEL : FLASH_LITE_MODEL;
+        const { plan, places } = await groundedPlanWith(model, input, timeoutSignal(budget()));
+        return { job: { ...job, stage: 'places', plan, places, updatedAt: now() }, activity: null };
+      }
+      case 'places': {
+        if (!job.plan) {
+          throw new Error('No grounded plan to resolve.');
+        }
+        const activity = await assembleFromMaps(input, job.plan, job.places ?? [], budget());
+        return { job: { ...job, updatedAt: now() }, activity };
+      }
+      case 'ticketmaster': {
+        const activity = await fromTicketmaster(input, budget);
+        return { job: { ...job, updatedAt: now() }, activity };
+      }
+      case 'fixture':
+        return { job: { ...job, updatedAt: now() }, activity: activityFixture };
+    }
+  } catch (error) {
+    return fail(error);
+  }
 }

@@ -10,6 +10,11 @@ import {
   type GroupStatus,
   type HangoutKind,
 } from '@degrees/shared';
+import {
+  activityJobSchema,
+  newActivityJob,
+  type ActivityJob,
+} from '../ai/generateActivity.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from './errors.js';
 import { exploreFrom, profileBasics } from './graph.js';
@@ -443,11 +448,13 @@ export async function activityInput(
   };
 }
 
-// One plan per group: generating again replaces the previous one.
+// One plan per group: generating again replaces the previous one. `job` is the resumable stage state kept while
+// status is 'generating' (see ai/generateActivity.ts runActivityStage); null once the plan is ready.
 export async function saveActivity(
   groupId: string,
   activity: Activity,
   status: ActivityStatus = 'ready',
+  job: ActivityJob | null = null,
 ): Promise<void> {
   const db = getServiceClient();
   const { error: deleteError } = await db
@@ -470,15 +477,59 @@ export async function saveActivity(
     source_url: activity.sourceUrl,
     reasoning: activity.reasoning,
     status,
+    job,
   });
   if (error) {
     throw new Error(`activities insert failed: ${error.message}`);
   }
 }
 
+export interface ActivityJobRow {
+  id: string;
+  status: ActivityStatus;
+  job: ActivityJob | null;
+  activity: Activity | null;
+}
+
+// The group's current activity row as a job: status, parsed job state (null when absent or unparseable), and
+// the plan itself. Null when the group has no activity row at all.
+export async function loadActivityJob(groupId: string): Promise<ActivityJobRow | null> {
+  const { data, error } = await getServiceClient()
+    .from('activities')
+    .select('*')
+    .eq('group_id', groupId)
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`activities read failed: ${error.message}`);
+  }
+  if (!data) return null;
+  const row = data as ActivityRow & { id: string; job: unknown };
+  const parsed = activityJobSchema.safeParse(row.job);
+  return {
+    id: row.id,
+    status: (row.status as ActivityStatus | null) ?? 'ready',
+    job: parsed.success ? parsed.data : null,
+    activity: toActivity(row),
+  };
+}
+
+export async function updateActivityJob(
+  activityId: string,
+  patch: { job?: ActivityJob | null; status?: ActivityStatus },
+): Promise<void> {
+  const { error } = await getServiceClient()
+    .from('activities')
+    .update(patch)
+    .eq('id', activityId);
+  if (error) {
+    throw new Error(`activities update failed: ${error.message}`);
+  }
+}
+
 // Christian (PR #22): the placeholder row POST /activity writes before handing off to the background function.
 // Coordinates default to campus so the row still satisfies the Activity contract.
-export async function setActivityGenerating(groupId: string): Promise<Activity> {
+export async function setActivityGenerating(groupId: string, job: ActivityJob = newActivityJob()): Promise<Activity> {
   const placeholder: Activity = {
     title: 'Curating hangout plan...',
     venue: 'Degrees AI',
@@ -492,6 +543,6 @@ export async function setActivityGenerating(groupId: string): Promise<Activity> 
     reasoning: 'Degrees AI is currently selecting a venue with Google Maps & Gemini that fits the group.',
     status: 'generating',
   };
-  await saveActivity(groupId, placeholder, 'generating');
+  await saveActivity(groupId, placeholder, 'generating', job);
   return placeholder;
 }
