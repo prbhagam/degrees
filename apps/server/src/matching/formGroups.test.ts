@@ -83,10 +83,50 @@ await test('fallback reasoning credits past "would meet again" feedback', () => 
 await test('valid model output is kept as-is, requester first', async () => {
   const group = await formGroups(input, {
     ...options,
+    generate: reply({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'You and Zoe both know Alex. Enjoy!' }),
+  });
+  assert.deepEqual(group.memberIds, ['me', 'c4', 'c2', 'c5']);
+  assert.equal(group.reasoning, 'You and Zoe both know Alex. Enjoy!');
+});
+
+await test('model reasoning that never names the connecting person is replaced', async () => {
+  const group = await formGroups(input, {
+    ...options,
     generate: reply({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'Model says hi.' }),
   });
   assert.deepEqual(group.memberIds, ['me', 'c4', 'c2', 'c5']);
-  assert.equal(group.reasoning, 'Model says hi.');
+  assert.match(group.reasoning, /^You and Zoe both know Alex/);
+});
+
+await test('a model group with no friend-of-a-friend gets the best-scoring one swapped in', async () => {
+  // c0, c1 are degree 1; c2 is the best-scoring degree-2 candidate. Under max: appended.
+  const appended = await formGroups(input, {
+    ...options,
+    generate: reply({ memberIds: ['c0', 'c1'], reasoning: 'You already know them.' }),
+  });
+  assert.deepEqual(appended.memberIds, ['me', 'c0', 'c1', 'c2']);
+  assert.match(appended.reasoning, /^You and Maya both know Alex/);
+  // At max (5 with the requester): the model's last pick makes room.
+  const onlyDirect = { ...input, candidates: input.candidates.map((c, index) => (index < 5 ? { ...c, degree: 1 } : c)) };
+  const swapped = await formGroups(onlyDirect, {
+    ...options,
+    generate: reply({ memberIds: ['c0', 'c1', 'c2', 'c3'], reasoning: 'You already know them.' }),
+  });
+  assert.deepEqual(swapped.memberIds, ['me', 'c0', 'c1', 'c2', 'c5']);
+});
+
+await test('Flash failing falls through to Lite before the deterministic fallback', async () => {
+  const models: string[] = [];
+  const group = await formGroups(input, {
+    ...options,
+    generate: async (_prompt, _signal, model) => {
+      models.push(model);
+      if (models.length === 1) throw new Error('503');
+      return JSON.stringify({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'You and Zoe both know Alex.' });
+    },
+  });
+  assert.deepEqual(models, ['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
+  assert.equal(group.reasoning, 'You and Zoe both know Alex.');
 });
 
 await test('unknown + duplicate ids are dropped, underfill is backfilled, reasoning replaced', async () => {

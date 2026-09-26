@@ -10,7 +10,7 @@ The logic that decides who meets whom. **Owner:** Sahith. It lives inside Christ
 |---|---|---|---|
 | 1. Traverse | `traverse.ts` | RPC `match_traverse` (migration 0003): recursive CTE over `connections`, both directions, depth ≤ `max_degrees` (cap 3), shortest degree + one deterministic path per person | Built |
 | 2. Narrow | `narrow.ts` | RPC `match_narrow` (0003, boost weight from 0004): cosine similarity vs. the requester's embedding, soft cost/travel filters, meet-again boost, excludes any "wouldn't meet again" pair | Built |
-| 3. Form | `formGroups.ts` | Gemini Flash picks members + reasoning; output sanitized; deterministic fallback | Built |
+| 3. Form | `formGroups.ts` | Gemini picks members + reasoning (Flash 4.5s → Lite 3s); output sanitized; deterministic fallback | Built |
 | 4. Plan | `../ai/generateActivity.ts` | Gemini + Maps grounding | Christian's |
 
 `routes/match.ts` runs traverse → narrow → formGroups in real mode and persists the group with RPC `match_create_group` (one transaction). Mock mode still returns `matchFixture`. Candidates carry `path` (user ids requester → candidate) so reasoning can name the connection.
@@ -20,6 +20,8 @@ Tests: `supabase/tests/run-local.sh` (SQL, throwaway local Postgres) and `npx ts
 ## Rules
 
 - **Group size is a soft constraint.** Aim for every member's `groupSizeMin`–`groupSizeMax`, and never drop a good group over it.
+- **Every group shows a degrees path when one exists.** If the model's group has no degree-2+ member while one is available, the sanitizer swaps in the best-scoring one (appended under max, else replacing the model's last pick). If the reasoning never names anyone on a friend-of-a-friend's path, it's replaced with the deterministic reasoning, which always does. Measured Sep 26: Lite skipped friends-of-friends in 2 of 4 groups without this.
+- **Model order is Flash, then Lite, inside 7.5s** so `match/run` fits Netlify's ~10s. On Sep 26 Flash timed out or returned 503/429 on nearly every call and Lite answered in ~1s, so in practice Lite forms most groups until Gemini billing is on.
 - **Matching never hard-fails.** If Gemini errors, times out, or returns ids that aren't in the candidate list, fall back to **top-N by stage-2 score** (pool-relative similarity + a small meet-again boost), with deterministic reasoning. Model output is also sanitized: unknown/duplicate ids dropped, backfilled to the minimum size, capped at 8. The H14 gate depends on it.
 - **Degrees:** the requester is degree 0 in responses (API-CONTRACTS: `0 = you`). Direct connections are 1 and mutuals are 2. `reasoning` should name the path ("you and Maya both know Chris"), because that's the demo beat.
 - `connections` stores each edge once with `user_a < user_b`. The traversal must walk **both** directions (`user_a = x OR user_b = x`). There's an index on `user_b` for this.
