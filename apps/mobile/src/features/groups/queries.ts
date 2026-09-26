@@ -1,7 +1,8 @@
 // Owner: Pranav (Groups, Activities & Chat) — TanStack Query hooks shared by the group, activity, and chat screens.
 import type { GroupStatus } from '@degrees/shared';
 import type { Session } from '@supabase/supabase-js';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { api } from '@/lib/api';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from '@/lib/supabase';
 
@@ -29,10 +30,59 @@ export function useMe() {
 }
 
 export function useGroup(id: string | undefined) {
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    if (!id || isSupabaseEnvironmentUnset()) return;
+    let cancelled = false;
+    let cleanup: (() => void) | undefined;
+
+    void currentSession().then((session) => {
+      if (cancelled || !session) return;
+      const supabase = getSupabaseClient();
+      const channel = supabase
+        .channel(`group-activity-sub:${id}`)
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'activities',
+            filter: `group_id=eq.${id}`,
+          },
+          () => {
+            void queryClient.invalidateQueries({
+              queryKey: queryKeys.group(id),
+            });
+          },
+        )
+        .subscribe();
+
+      cleanup = () => {
+        void supabase.removeChannel(channel);
+      };
+    });
+
+    return () => {
+      cancelled = true;
+      cleanup?.();
+    };
+  }, [id, queryClient]);
+
   return useQuery({
     queryKey: queryKeys.group(id ?? ''),
     queryFn: () => api.getGroup(id!),
     enabled: Boolean(id),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      if (
+        data?.activityStatus === 'generating' ||
+        data?.activity?.status === 'generating'
+      ) {
+        return 2000;
+      }
+      return false;
+    },
   });
 }
 

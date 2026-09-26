@@ -108,6 +108,8 @@ export const feedbackRequestSchema = z.object({
   freeText: z.string().optional(),
 });
 
+export const activityStatusSchema = z.enum(['generating', 'ready', 'failed']);
+
 export const activitySchema = z.object({
   title: z.string(),
   venue: z.string(),
@@ -119,6 +121,7 @@ export const activitySchema = z.object({
   source: activitySourceSchema,
   sourceUrl: z.string().nullable(),
   reasoning: z.string(),
+  status: activityStatusSchema.optional(),
 });
 
 export const analyzeFeedbackOutputSchema = z.object({

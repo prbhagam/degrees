@@ -2,6 +2,7 @@
 import {
   activitySchema,
   type Activity,
+  type ActivityStatus,
   type GenerateActivityInput,
   type GroupMember,
   type GroupResponse,
@@ -122,6 +123,7 @@ interface ActivityRow {
   source: string | null;
   source_url: string | null;
   reasoning: string | null;
+  status?: string | null;
 }
 
 function toActivity(row: ActivityRow): Activity | null {
@@ -129,14 +131,15 @@ function toActivity(row: ActivityRow): Activity | null {
     title: row.title ?? '',
     venue: row.venue ?? '',
     address: row.address ?? '',
-    lat: row.lat,
-    lng: row.lng,
+    lat: row.lat ?? 0,
+    lng: row.lng ?? 0,
     priceCents: row.price_cents,
     // Postgres returns "+00:00" offsets; the contract wants ISO 8601 UTC with Z.
     startsAt: row.starts_at ? new Date(row.starts_at).toISOString() : null,
-    source: row.source,
+    source: row.source === 'ticketmaster' ? 'ticketmaster' : 'maps',
     sourceUrl: row.source_url,
     reasoning: row.reasoning ?? '',
+    status: (row.status as ActivityStatus) ?? 'ready',
   });
   if (!parsed.success) {
     console.warn(
@@ -220,13 +223,16 @@ export async function loadGroup(
   const unrevealedCount = members.filter((member) => !member.revealed).length;
 
   const activityRow = activityResult.data[0] as ActivityRow | undefined;
+  const activityStatus = (activityRow?.status as ActivityStatus | null) ?? (activityRow ? 'ready' : null);
+  const activity = activityRow ? toActivity(activityRow) : null;
   return {
     id: groupResult.data.id as string,
     status,
     reasoning: (groupResult.data.reasoning as string | null) ?? '',
     members,
     unrevealedCount,
-    activity: activityRow ? toActivity(activityRow) : null,
+    activity,
+    activityStatus,
     completedAt: (groupResult.data.completed_at as string | null) ?? null,
   };
 }
@@ -303,6 +309,7 @@ export async function activityInput(
 export async function saveActivity(
   groupId: string,
   activity: Activity,
+  status: ActivityStatus = 'ready',
 ): Promise<void> {
   const db = getServiceClient();
   const { error: deleteError } = await db
@@ -312,7 +319,7 @@ export async function saveActivity(
   if (deleteError) {
     throw new Error(`activities delete failed: ${deleteError.message}`);
   }
-  const { error } = await db.from('activities').insert({
+  const payload: Record<string, unknown> = {
     group_id: groupId,
     title: activity.title,
     venue: activity.venue,
@@ -324,8 +331,33 @@ export async function saveActivity(
     source: activity.source,
     source_url: activity.sourceUrl,
     reasoning: activity.reasoning,
-  });
+    status,
+  };
+  let { error } = await db.from('activities').insert(payload);
+  if (error && error.message?.includes('status')) {
+    delete payload.status;
+    const retry = await db.from('activities').insert(payload);
+    error = retry.error;
+  }
   if (error) {
     throw new Error(`activities insert failed: ${error.message}`);
   }
+}
+
+export async function setActivityGenerating(groupId: string): Promise<Activity> {
+  const placeholder: Activity = {
+    title: 'Curating hangout plan...',
+    venue: 'Degrees AI',
+    address: 'Finding a venue near everyone...',
+    lat: 33.7756,
+    lng: -84.3963,
+    priceCents: null,
+    startsAt: null,
+    source: 'maps',
+    sourceUrl: null,
+    reasoning: 'Degrees AI is currently selecting a venue with Google Maps & Gemini that fits the group.',
+    status: 'generating',
+  };
+  await saveActivity(groupId, placeholder, 'generating');
+  return placeholder;
 }

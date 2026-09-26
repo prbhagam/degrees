@@ -21,7 +21,7 @@ const AUTH_SCREENS = new Set(['login', 'signup']);
 export function consumePendingHref(): Href {
   const { pendingHref, setPendingHref } = useSessionStore.getState();
   setPendingHref(null);
-  return pendingHref ?? '/';
+  return pendingHref ?? '/index';
 }
 
 // Restores the saved session on launch and tracks sign-in/out. Mock-mode dev (no Supabase env) counts as

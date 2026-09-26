@@ -115,7 +115,7 @@ await test('a model group with no friend-of-a-friend gets the best-scoring one s
   assert.deepEqual(swapped.memberIds, ['me', 'c0', 'c1', 'c2', 'c5']);
 });
 
-await test('Flash failing falls through to Lite before the deterministic fallback', async () => {
+await test('First model failing falls through to second before the deterministic fallback', async () => {
   const models: string[] = [];
   const group = await formGroups(input, {
     ...options,
@@ -125,7 +125,7 @@ await test('Flash failing falls through to Lite before the deterministic fallbac
       return JSON.stringify({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'You and Zoe both know Alex.' });
     },
   });
-  assert.deepEqual(models, ['gemini-3.8-flash', 'gemini-3.5-flash-lite']);
+  assert.deepEqual(models, ['gemini-3.5-flash-lite', 'gemini-3.8-flash']);
   assert.equal(group.reasoning, 'You and Zoe both know Alex.');
 });
 

@@ -23,9 +23,10 @@ src/routes/*.ts          one Hono sub-app per contract area: me, profile, prefer
                          events (join + host), match, groups (view, respond, complete, activity, photos,
                          exchange-request/accept), messages, feedback, notifications (mock only).
                          connections, events, groups, and messages are Pranav's.
-src/ai/                  Gemini wrapper + the four AI calls — see src/ai/AGENTS.md
+src/ai/                  Gemini wrapper + the four AI calls + rate limiter — see src/ai/AGENTS.md
 src/matching/            Sahith's pipeline — see src/matching/AGENTS.md
 src/mocks/fixtures.ts    the coherent mock world every stub returns (Atlanta, HackGT, demo group)
+netlify/functions/       api.ts (Hono router) + activity-background.ts (asynchronous activity generation)
 ```
 
 ## Mock mode vs real mode

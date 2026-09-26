@@ -23,11 +23,11 @@ function targetFor(notification: Notification): Href {
     case 'hangout_invited':
     case 'hangout_forming':
     case 'message_received':
-      return id ? { pathname: '/groups/[id]', params: { id } } : '/';
+      return id ? { pathname: '/groups/[id]', params: { id } } : '/index';
     case 'feedback_prompt':
     case 'exchange_requested':
     case 'exchange_accepted':
-      return id ? { pathname: '/groups/[id]/feedback', params: { id } } : '/';
+      return id ? { pathname: '/groups/[id]/feedback', params: { id } } : '/index';
     case 'connection_added':
       return '/circle';
   }

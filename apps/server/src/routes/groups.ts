@@ -25,6 +25,7 @@ import {
   loadGroup,
   memberRows,
   saveActivity,
+  setActivityGenerating,
 } from '../lib/groups.js';
 import type { AppEnv } from '../middleware/auth.js';
 import { DEMO_GROUP_ID, groupFixture, people } from '../mocks/fixtures.js';
@@ -173,16 +174,44 @@ export const groupRoutes = new Hono<AppEnv>()
   })
   .post('/groups/:id/activity', async (context) => {
     const groupId = context.req.param('id');
+    const userId = context.get('userId');
     if (env.mockMode) {
       assertMockGroup(groupId);
       mockActivity = await generateActivity(mockActivityInput);
       const response: Activity = mockActivity;
       return context.json(response);
     }
-    const input = await activityInput(groupId, context.get('userId'));
-    const response: Activity = await generateActivity(input);
-    await saveActivity(groupId, response);
-    return context.json(response);
+    // Verify membership
+    await memberRows(groupId, userId);
+
+    // Save placeholder with 'generating' status
+    const placeholder = await setActivityGenerating(groupId);
+
+    // Trigger async generation in background
+    const isNetlify = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    if (isNetlify) {
+      const netlifyUrl = process.env.URL || 'https://degrees-api.netlify.app';
+      fetch(`${netlifyUrl}/.netlify/functions/activity-background`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId, userId }),
+      }).catch((err) => {
+        console.warn('[groups/activity] failed to invoke Netlify background function:', err);
+      });
+    } else {
+      // Local development background runner in Node.js event loop
+      (async () => {
+        try {
+          const input = await activityInput(groupId, userId);
+          const activity = await generateActivity(input);
+          await saveActivity(groupId, activity, 'ready');
+        } catch (err) {
+          console.error('[groups/activity] local background generation failed:', err);
+        }
+      })();
+    }
+
+    return context.json(placeholder);
   })
   .post('/groups/:id/complete', async (context) => {
     const groupId = context.req.param('id');

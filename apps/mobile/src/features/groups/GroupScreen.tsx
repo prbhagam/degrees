@@ -63,11 +63,46 @@ function MemberRow({ member, index }: { member: GroupMember; index: number }) {
 
 function ActivityPreview({
   activity,
+  activityStatus,
   onPress,
 }: {
   activity: Activity | null;
+  activityStatus?: string | null;
   onPress: () => void;
 }) {
+  const isGenerating =
+    activity?.status === 'generating' || activityStatus === 'generating';
+
+  if (isGenerating) {
+    return (
+      <Pressable onPress={onPress} accessibilityRole="button">
+        <Card className="border-sage/40 bg-paper-raised">
+          <View className="flex-row items-center justify-between">
+            <Heading>The plan</Heading>
+            <View className="flex-row items-center gap-1.5 rounded-full bg-sage/20 px-2.5 py-0.5">
+              <Sparkles size={12} color="#5B7A6B" />
+              <Text className="font-body-semibold text-xs text-sage">AI Generating…</Text>
+            </View>
+          </View>
+          <View className="flex-row items-center gap-3 pt-1">
+            <View className="h-11 w-11 items-center justify-center rounded-l bg-sage/10">
+              <Sparkles size={22} color="#5B7A6B" />
+            </View>
+            <View className="flex-1">
+              <Text className="font-body-semibold text-base text-ink">
+                Finding the best spot…
+              </Text>
+              <Muted numberOfLines={1}>
+                Degrees AI is curating a real hangout plan
+              </Muted>
+            </View>
+            <ChevronRight size={20} color="#8A8378" />
+          </View>
+        </Card>
+      </Pressable>
+    );
+  }
+
   if (!activity) {
     return (
       <Card>
@@ -118,7 +153,7 @@ export function GroupScreen() {
       if (accept) {
         void queryClient.invalidateQueries({ queryKey: queryKeys.group(id!) });
       } else {
-        router.replace('/');
+        router.replace('/index');
       }
     },
   });
@@ -201,6 +236,7 @@ export function GroupScreen() {
             <>
               <ActivityPreview
                 activity={group.data.activity}
+                activityStatus={group.data.activityStatus}
                 onPress={() => router.push(`/groups/${id}/activity`)}
               />
 
