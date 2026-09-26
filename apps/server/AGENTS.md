@@ -18,6 +18,7 @@ src/lib/errors.ts        ApiError + validateJson(): every error becomes { error:
 src/lib/graph.ts         exploreFrom(): BFS over connections → each person's degree + path (the `via` field)   (Pranav)
 src/lib/groups.ts        loadGroup() as the viewer sees it, membership checks (404 for non-members), activity I/O (Pranav)
 src/external/            places.ts (Places API New) + ticketmaster.ts (Discovery, cached per area)             (Pranav)
+src/routes/auth.ts       POST /api/auth/signup — the only public route, mounted before requireAuth in app.ts
 src/routes/*.ts          one Hono sub-app per contract area: me, profile, preferences, connections + graph,
                          events (join + host), match, groups (view, respond, complete, activity, photos,
                          exchange-request/accept), messages, feedback, notifications (mock only).
@@ -45,7 +46,7 @@ When a route goes real, replace its fixture return with the real query but keep 
 - Money is integer cents. Timestamps are ISO 8601 UTC strings (`new Date().toISOString()`).
 - **Every `/groups/:id/*` route checks membership** with `memberRows()` from `lib/groups.ts` (404 for non-members, so group ids don't leak). As of Sep 26 `respond`, `complete`, `exchange-*`, and `photos` don't yet — see Known gaps.
 - **Identity past 1st degree is redacted server-side** (`lib/groups.ts` `loadGroup`, `routes/match.ts`): no id, name, bio, or photo until an edge exists or the group is confirmed. Any new response that includes people must apply the same rule, including free text such as `reasoning`.
-- Add new routes by exporting a sub-app from `src/routes/` and mounting it in `app.ts`. Contract changes go through [packages/shared](../../packages/shared/AGENTS.md) first.
+- Add new routes by exporting a sub-app from `src/routes/` and mounting it in `app.ts`. **Public routes** mount on `app` *before* the `api` sub-app with `requireAuth`: a matched handler that returns ends the chain. Keep public routes to signup only. Contract changes go through [packages/shared](../../packages/shared/AGENTS.md) first.
 
 ## Deployed
 
@@ -66,7 +67,6 @@ Physical phones reach the dev server over your LAN IP. The server listens on all
 ## Known gaps (Sep 26)
 
 Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
-- **New users get no `profiles` row.** `PUT /api/profile` only updates, and nothing inserts on signup, so `GET /api/me` 404s for a real new account.
 - **Missing membership checks**: `POST /groups/:id/respond` (one member's accept confirms the group for everyone), `POST /groups/:id/complete` (forms edges between every member), `exchange-request`/`exchange-accept`, and `GET/POST /groups/:id/photos`.
 - **No notification writes.** The `notifications` table and the client read exist; no route inserts rows at invite, message, feedback-due, exchange, or connection time.
 - **Photos**: the real `POST` returns `{ ok }` but the contract and the app expect `{ photos }`; the body isn't Zod-validated; the 24h lock isn't enforced (nor for chat `POST`).

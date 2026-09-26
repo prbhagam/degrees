@@ -20,6 +20,8 @@ import type {
   PhotosResponse,
   SendMessageRequest,
   SendMessageResponse,
+  SignupRequest,
+  SignupResponse,
   UpdatePreferencesRequest,
   UpdateProfileRequest,
 } from '@degrees/shared';
@@ -79,10 +81,16 @@ function parseJson(text: string): unknown {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = await accessToken();
+// `authenticated: false` is only for the public auth routes, which are called before a session exists.
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  { authenticated = true }: { authenticated?: boolean } = {},
+): Promise<T> {
   const headers = new Headers(init?.headers);
-  headers.set('Authorization', `Bearer ${token}`);
+  if (authenticated) {
+    headers.set('Authorization', `Bearer ${await accessToken()}`);
+  }
   if (init?.body) {
     headers.set('Content-Type', 'application/json');
   }
@@ -115,6 +123,10 @@ const json = (method: string, body: unknown): RequestInit => ({
 const groupPath = (id: string) => `/api/groups/${encodeURIComponent(id)}`;
 
 export const api = {
+  signup: (body: SignupRequest) =>
+    request<SignupResponse>('/api/auth/signup', json('POST', body), {
+      authenticated: false,
+    }),
   getMe: () => request<MeResponse>('/api/me'),
   updateProfile: (body: UpdateProfileRequest) =>
     request<OkResponse>('/api/profile', json('PUT', body)),

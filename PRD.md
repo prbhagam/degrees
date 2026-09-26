@@ -124,9 +124,9 @@ Beat 4 is the point: the app gets smarter from real use, on stage.
 
 ## 9. Still open
 
-- **Resend usage** — assumed transactional only (password reset), with **email verification off** for the demo so venue signups aren't blocked. Confirm.
+- **Resend usage** — assumed transactional only (password reset), with **email verification off** for the demo so venue signups aren't blocked. **Checked Sep 26: "Confirm email" is actually ON**; server-side signup bypasses it, so it only matters if Resend or password reset is added.
 - **Frequency preference** (daily/few times a week/weekly/biweekly/monthly) has no scheduler in a 36-hour build. Store it, honor it in copy, don't build cron.
-- **Login is spec'd as "username + password" but implemented against Supabase Auth's email/password.** No username-based auth bridge was built — confirm with Christian/Sahith whether that's intended or the spec should change.
+- ~~**Login is spec'd as "username + password" but implemented against Supabase Auth's email/password.**~~ **Resolved Sep 26:** username + password. A username maps to `<username>@degrees.demo`, and signup goes through `POST /api/auth/signup` (the project's email confirmation made client-side signup impossible).
 
 **Resolved Sep 26 (were open, now decided):**
 

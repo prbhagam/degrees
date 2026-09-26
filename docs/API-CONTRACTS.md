@@ -4,14 +4,26 @@
 
 This file is what makes four people concurrent. It is implemented as TypeScript types + Zod schemas in [`packages/shared`](../packages/shared/src) — change both together. Frontend builds against stubs matching these shapes; the server fills them in. Nobody blocks after H2.
 
-**Base:** `https://api.degrees.tech`
-**Auth:** every endpoint requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
+**Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
+**Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
 
 ---
 
 ## Client → Server
 
 ```ts
+// ---- Auth (Added Sep 26) ---------------------------------------------------
+POST /api/auth/signup            // PUBLIC — no Authorization header
+  { username, password, displayName, phone, pronouns? }
+  → { ok: true, userId }
+  // username: 3–20 of [a-z0-9._], lowercased server-side. password: 8+ chars.
+  // The server creates the Supabase auth user already confirmed, as `<username>@degrees.demo`,
+  // plus the profiles row. The client then signs in with supabase.auth.signInWithPassword using
+  // authEmailFor(username) from @degrees/shared. Login is the same call — there is no login route.
+  // 409 username_taken · 400 invalid_request
+  // Why server-side: the Supabase project requires email confirmation, which a @degrees.demo
+  // address can never complete, and nothing else creates a new user's profiles row.
+
 // ---- Profile & preferences ------------------------------------------------
 GET  /api/me
   → { id, username, displayName, bio, aiParagraph, city,

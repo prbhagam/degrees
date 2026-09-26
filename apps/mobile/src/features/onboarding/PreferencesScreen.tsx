@@ -6,6 +6,7 @@ import { Stack, useRouter } from 'expo-router';
 import type { Frequency } from '@degrees/shared';
 import { Pressable, Text, View } from 'react-native';
 import { Body, Button, Card, Chip, ErrorState, Muted, Screen, Stepper } from '@/components/ui';
+import { consumePendingHref } from '@/features/auth/session';
 import { api } from '@/lib/api';
 
 const DEGREES = [
@@ -49,7 +50,8 @@ export function PreferencesScreen() {
         groupSizeMax: groupMax,
         maxDegrees: degree,
       }),
-    onSuccess: () => router.replace('/'),
+    // End of onboarding: go where a signed-out visit was headed (e.g. a scanned event link), else home.
+    onSuccess: () => router.replace(consumePendingHref()),
   });
 
   return (

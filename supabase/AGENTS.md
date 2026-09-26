@@ -48,7 +48,7 @@ To test locally without the Supabase CLI, apply the migration to a throwaway Pos
 2. `npm run seed` — re-embeds every profile with Gemini (`gemini-embedding-001`, 768 dims, `SEMANTIC_SIMILARITY`).
    Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY` in the root `.env`. Safe to rerun.
 
-Demo logins are `<username>@degrees.demo` / `DegreesDemo26!`. The app's signup should build emails the same way, but as of Sep 26 it takes a typed email, and **nothing creates a `profiles` row for a new auth user** (no trigger, and `PUT /api/profile` only updates). A `0007` trigger on `auth.users` that inserts the profile row is the planned fix; see [docs/ROLES.md](../docs/ROLES.md#next-steps-sep-26).
+Demo logins are `<username>@degrees.demo` / `DegreesDemo26!`. New accounts are created by the server's `POST /api/auth/signup` (service role): a confirmed auth user as `<username>@degrees.demo` plus its `profiles` row, in one request. There's no `auth.users` trigger, so a user created any other way (e.g. the dashboard) has no profile row until one is inserted. **The project has "Confirm email" on**, and its built-in mailer is rate-limited: client-side `auth.signUp` fails with `over_email_send_rate_limit`, and `@degrees.demo` can't receive mail anyway. Server-side signup bypasses both.
 
 ## Seed requirements (from DATA-MODEL.md)
 

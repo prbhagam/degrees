@@ -80,12 +80,12 @@ Written after PR #14 merged, from a full test pass. Local suite green: typecheck
 | H4 server is real | **Met.** `https://degrees-api.netlify.app`: `/health` 200, fake token → 401 |
 | H6 contracts smoke | **Met** for the deployed server; PR #14's contract passes in mock mode, not yet live |
 | H14 matching gate | **Met.** Real groups off seed data; every seeded user gets a friend-of-a-friend |
-| H20 live-data gate | **At risk.** A real new signup can't use the app (no `profiles` row); fix in Wave 1 before recruiting |
+| H20 live-data gate | **Unblocked (Sep 26, auth PR):** username signup creates a working account end to end. Now it's about recruiting ~10 real accounts with real edges |
 | H26 hard freeze | Pending |
 
 ### Decisions for the team (make these first)
 
-1. **Username or email login?** The PRD and rule 9 say username + password, the seeded demo logins are `<username>@degrees.demo`, and the Sep 26 signup screen asks for an email. **Recommendation: username.** Signup and login take a username and build `<username>@degrees.demo`. It's faster to type on stage and matches the seed.
+1. ~~**Username or email login?**~~ **Implemented as username** (auth PR, Sep 26), following the PRD and the seeded demo logins. Easy to revisit if the team prefers email.
 2. **Does one member's accept confirm the group for everyone?** Right now yes, and confirming reveals every member to every other member. Recommendation: keep it for the demo and write it down. Per-member accepts are more work than the time left.
 3. **Photos and notifications: build or cut from the demo?** Recommendation: build a few notifications (they make the demo feel alive), and cut photo upload unless Pranav finishes Wave 1 early.
 
@@ -101,9 +101,9 @@ Written after PR #14 merged, from a full test pass. Local suite green: typecheck
 
 | Who | Task | Why |
 |---|---|---|
-| Sahith | `0007`: trigger on `auth.users` that inserts the `profiles` row (id, username from the email's local part, display name), plus a backfill for existing auth users | Without it, `/me`, matching, and everything else fail for real new accounts |
+| ~~Sahith~~ | ~~Profile row for new users~~ **Done (auth PR):** `POST /api/auth/signup` creates the confirmed auth user and `profiles` row server-side. No trigger needed | Email confirmation was on and rate-limited, so client signups were failing outright |
 | Sahith | `formGroups`: never name degree-2+ members or their path in `reasoning` (hide their names from the prompt, reject replies that contain one, deterministic text says "plus N from your wider network") | Reasoning currently shows names the redaction hides |
-| Charles | Signup + login take a **username** and build `<username>@degrees.demo` (per decision 1) | Matches the seed and the 0007 trigger |
+| ~~Charles~~ | ~~Username signup + login~~ **Done (auth PR),** plus an auth gate: signed-out visits go to login and come back to the scanned link | Charles: please review the changes to your auth, onboarding, and scaffold files |
 | Pranav | `ScanScreen`: pass `eventId`/`eventName` through to `connect/[peerId]` | In-app person scans always fail with "missing event" (demo beat 1) |
 | Christian | Add `memberRows()` checks to `respond`, `complete`, `exchange-request/accept`, and `photos` | Any signed-in user with a group id can confirm or complete it, which forms edges between strangers |
 

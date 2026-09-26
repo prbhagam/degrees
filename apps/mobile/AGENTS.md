@@ -66,7 +66,13 @@ Deep links come free from the `degrees` scheme in `app.json`. For example, `degr
 
 - Env lives in **`apps/mobile/.env`**, not the repo root, because Expo reads `.env` from the app folder. Copy `.env.example`.
 - `EXPO_PUBLIC_*` values are **baked into the app bundle and public**. Only the Supabase URL and publishable (anon) key go here, never the service role key.
-- With no Supabase env in dev, `api.ts` sends `Bearer dev` and the mock-mode server accepts it, so every screen works against fixtures without signing in.
+- With no Supabase env in dev, `api.ts` sends `Bearer dev` and the mock-mode server accepts it, so every screen works against fixtures without signing in (the auth gate treats that as signed in).
+
+## Auth
+
+- **Signup** calls `api.signup` (`POST /api/auth/signup`, public), then `signInWithPassword` with `authEmailFor(username)`. **Login** is `signInWithPassword` with `authEmailFor(username)`. Never call `supabase.auth.signUp`: the project requires email confirmation, which a `@degrees.demo` address can't complete.
+- **The gate** is `features/auth/session.ts`, mounted in the root layout. `useAuthSubscription` restores the saved session (the splash stays up until it has), and `AuthGate` sends any signed-out visit to `/login`, remembering where it was headed. Once per sign-in it sends an unfinished profile (`hasCompletedProfile: false`) to onboarding.
+- After login, or at the end of onboarding, call `consumePendingHref()` to go where the person was headed, e.g. a scanned `join/HACKGT` link. New screens are gated automatically; don't add per-screen auth checks.
 - The production API is `https://degrees-api.netlify.app`. Set it as `EXPO_PUBLIC_API_URL` for release/TestFlight builds.
 - The API URL defaults in dev to **the machine running Metro, on port 8787**. That address comes from Expo's `hostUri`, so a phone on the same Wi-Fi reaches your laptop. Set `EXPO_PUBLIC_API_URL` to override it. Release builds require it, and it must be **HTTPS**, because iOS App Transport Security blocks plain HTTP.
 
@@ -107,7 +113,6 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 ## Known gaps (Sep 26)
 
 Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
-- **Signup** takes an email (no username) and never creates a `profiles` row; a real new account can't use the app yet.
 - **ScanScreen** drops `eventId`/`eventName` when routing a person QR to `connect/[peerId]`, so in-app scans always hit "missing event".
 - **Photos** post a placeholder path (`demo/<ts>.jpg`); no image picker or Storage upload yet, and no bucket exists.
 - **Notifications** do a one-shot select (no Realtime, no mark-read), and nothing writes rows yet.

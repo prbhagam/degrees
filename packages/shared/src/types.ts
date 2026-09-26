@@ -10,6 +10,7 @@ import type {
   notificationTypeSchema,
   respondRequestSchema,
   sendMessageRequestSchema,
+  signupRequestSchema,
   updatePreferencesRequestSchema,
   updateProfileRequestSchema,
 } from './schemas';
@@ -52,12 +53,18 @@ export type CreateConnectionRequest = z.infer<
 >;
 export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
 export type FeedbackRequest = z.infer<typeof feedbackRequestSchema>;
+export type SignupRequest = z.infer<typeof signupRequestSchema>;
 export type CreateEventRequest = z.infer<typeof createEventRequestSchema>;
 export type ExchangeRequest = z.infer<typeof exchangeRequestSchema>;
 export type RespondRequest = z.infer<typeof respondRequestSchema>;
 
 export interface OkResponse {
   ok: true;
+}
+
+// Added Sep 26 — POST /api/auth/signup. The client signs in with the password right after.
+export interface SignupResponse extends OkResponse {
+  userId: string;
 }
 
 export interface CreateConnectionResponse extends OkResponse {
