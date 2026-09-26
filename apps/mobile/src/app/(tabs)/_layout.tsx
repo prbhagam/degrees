@@ -28,16 +28,16 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="circle"
         options={{
-          title: 'Your circle',
-          tabBarLabel: 'Circle',
+          title: '1st degree',
+          tabBarLabel: '1st degree',
           tabBarIcon: ({ color, size }) => <Network color={color} size={size} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          title: 'Profile',
-          tabBarLabel: 'Profile',
+          title: 'Degree 0 (You)',
+          tabBarLabel: 'Degree 0',
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />

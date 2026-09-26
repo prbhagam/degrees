@@ -40,7 +40,7 @@ function hangoutSubtitle(hangout: HangoutSummary): string {
     if (hangout.scheduledAt) parts.push(format(parseISO(hangout.scheduledAt), 'EEE MMM d, h:mm a'));
     if (hangout.roomCode) parts.push(`Code ${hangout.roomCode}`);
     parts.push(`${hangout.memberCount} ${hangout.memberCount === 1 ? 'person' : 'people'}`);
-    if (hangout.completedAt) parts.push('Ended');
+    if (hangout.completedAt) parts.push('Ended · leave feedback');
   } else {
     parts.push(STATUS_LABEL[hangout.status]);
     if (hangout.status === 'completed') parts.push('Leave feedback');
@@ -117,7 +117,7 @@ function ProfileNag({ status }: { status: { interests: boolean; about: boolean; 
           <Text className="font-body-semibold text-sm text-ember-ink">Finish setting up</Text>
         </View>
         <Text className="font-body text-sm text-ink">
-          You haven't set up your {missing.join(', ')}. Matching can't work without that — tap to finish.
+          You haven't set up your {missing.join(', ')}. Reaching past your 1st degree can't work without that — tap to finish.
         </Text>
       </Card>
     </Pressable>
@@ -180,17 +180,18 @@ export function HomeScreen() {
           <HangoutRow key={hangout.id} hangout={hangout} onPress={() => router.push(`/groups/${hangout.id}`)} />
         ))}
         {hangouts.data && active.length === 0 ? (
-          <Muted>Nothing on right now. Meet a few people, then find your first group.</Muted>
+          <Muted>Nothing on right now. Meet a few people in person (your 1st degree), then find your first group.</Muted>
         ) : null}
         <Button label="Find my group" icon={<Users size={18} color="#F7F3EC" />} onPress={() => router.push('/match')} />
+        <Muted>Degrees reaches through your 1st degree, then theirs — as far as you've set.</Muted>
       </View>
 
       <View className="gap-3">
-        <Heading>Grow your circle</Heading>
+        <Heading>Grow your 1st degree</Heading>
         <ActionRow
           icon={<QrCode size={22} color={ink} />}
           title="Meet someone"
-          subtitle="Show your code or scan theirs"
+          subtitle="Show your code or scan theirs — that's a 1st-degree edge"
           onPress={() => router.push('/connect')}
         />
         <ActionRow

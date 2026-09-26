@@ -11,9 +11,9 @@ const COPY: Record<Notification['type'], (payload: Record<string, unknown>) => {
   hangout_forming: (p) => ({ title: 'Your group is forming', subtitle: String(p.name ?? '') }),
   message_received: (p) => ({ title: `New message from ${p.senderName ?? 'someone'}`, subtitle: 'Open the group chat' }),
   feedback_prompt: (p) => ({ title: 'Rate your last hangout', subtitle: String(p.name ?? '') }),
-  exchange_requested: (p) => ({ title: `${p.peerName ?? 'Someone'} wants to exchange contacts`, subtitle: 'Open Feedback to respond' }),
-  exchange_accepted: (p) => ({ title: `${p.peerName ?? 'Someone'} agreed to exchange contacts`, subtitle: 'Open Feedback to see their number' }),
-  connection_added: (p) => ({ title: `${p.peerName ?? 'Someone'} is now in your circle`, subtitle: 'See who else you know' }),
+  exchange_requested: (p) => ({ title: `${p.peerName ?? 'Someone'} wants to exchange numbers`, subtitle: 'Open 1st degree to respond' }),
+  exchange_accepted: (p) => ({ title: `${p.peerName ?? 'Someone'} agreed to exchange numbers`, subtitle: 'Open 1st degree to see their number' }),
+  connection_added: (p) => ({ title: `${p.peerName ?? 'Someone'} is now your 1st degree`, subtitle: 'See who else you know' }),
 };
 
 function targetFor(notification: Notification): Href {

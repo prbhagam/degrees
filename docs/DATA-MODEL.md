@@ -129,7 +129,8 @@ activities (
   starts_at     timestamptz,
   source        text,              -- 'maps' | 'ticketmaster'
   source_url    text,
-  reasoning     text
+  reasoning     text,
+  created_at    timestamptz default now()   -- wave 3 (0010): plans are kept; newest row = current, older 'ready' rows = history
 )
 
 -- Chat --------------------------------------------------------------------
@@ -175,6 +176,18 @@ contact_exchanges (
   created_at        timestamptz default now(),
   primary key (group_id, user_a, user_b),
   check (user_a < user_b)          -- same canonical-ordering convention as connections
+)
+
+-- wave 3 (0010): the same idea keyed on the connection pair instead of a group, for Your Circle. Zero client grants.
+connection_contacts (
+  user_a            uuid references profiles,
+  user_b            uuid references profiles,
+  a_accepted        boolean not null default false,
+  b_accepted        boolean not null default false,
+  created_at        timestamptz default now(),
+  updated_at        timestamptz default now(),
+  primary key (user_a, user_b),
+  check (user_a < user_b)
 )
 
 -- Actual image bytes live in Supabase Storage; this is just the pointer + who/when.
@@ -224,7 +237,13 @@ notifications (
 
 **Added Sep 26 — the event lobby is a display-only exception, not a graph exception.** `POST /api/events/:roomCode/join` returns real name/bio/photo for every attendee regardless of the connections graph (Charles: co-presence at an event is enough to show basic info in the lobby). It deliberately does **not** insert `connections` rows for the whole room — that stays the explicit, one-at-a-time "We met" action (`JoinRoomScreen` → `POST /api/connections`, `met_context: 'event'`), which is what Circle's degree math and the redaction rule above actually depend on. Considered and rejected: auto-connecting every co-attendee pair on join, which would make Circle show people you never actually talked to as "met."
 
-**Contact exchange never has client grants.** `contact_exchanges` has RLS enabled but zero policies — every read and write goes through the API server (service-role), because whether a phone number is revealed must be computed server-side from both `a_accepted`/`b_accepted` flags, never trusted from the client.
+**Contact exchange never has client grants.** `contact_exchanges` and `connection_contacts` (wave 3) have RLS enabled but zero policies — every read and write goes through the API server (service-role), because whether a phone number is revealed must be computed server-side from both `a_accepted`/`b_accepted` flags, never trusted from the client. Wave 3 moved the feature to Your Circle and keyed it on the pair, so a swapped number outlives the group it happened in.
+
+**`profile_tags.kind = 'avoid'` is a constraint, not an interest (wave 3).** Every reader splits by kind: the planner turns avoids into hard rules, icebreakers and the match reasoning ignore them, `match_narrow` (redefined in 0010) leaves them out of `interests`, and the embedding puts them on their own "Prefers to skip:" line. Before 0010 they were aggregated with everything else, which is how "avoid alcohol" produced pub recommendations.
+
+**Plans are kept (wave 3).** `activities` holds every plan a group generated; the newest row is the current plan and older `ready` rows are `GroupResponse.activityHistory`. `saveActivity` deletes only `generating`/`failed` placeholders. The planner is told the previous venues so "Suggest something else" can't repeat one.
+
+**Realtime (wave 3):** `group_members` (FULL replica identity, so DELETE events carry `group_id`) and `groups` are in `supabase_realtime`, alongside `messages`, `notifications`, and `activities`. The group screen subscribes to all three with the JWT set on the socket, so a join, a leave, or "End meetup" reaches everyone already there without a refresh.
 
 **Storage (wave 2, migration 0007).** Two buckets, created and policed by SQL: `event-photos` (private; objects live at `<group_id>/<file>`; `storage.objects` policies let `authenticated` insert/select only where `is_group_member(<folder>)`; the API returns signed URLs) and `avatars` (public; `<user_id>/<file>`; only the owner may insert/update/delete; the public URL is stored in `profiles.photo_url`). Avatars are public by design: the URL is unguessable and the app shows photos to groupmates and 1st-degree connections anyway.
 

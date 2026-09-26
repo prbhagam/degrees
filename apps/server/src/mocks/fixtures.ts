@@ -129,8 +129,8 @@ export const preferencesFixture = meFixture.preferences satisfies UpdatePreferen
 // plus `mutualEdges` between two of the viewer's own connections who also know each other.
 export const graphFixture = {
   nodes: [
-    { id: people[1].id, displayName: 'Maya Patel', bio: people[1].bio, photoUrl: null, metAt: 'HackGT Opening Mixer' },
-    { id: people[2].id, displayName: 'Chris Brooks', bio: people[2].bio, photoUrl: null, metAt: 'HackGT Opening Mixer' },
+    { id: people[1].id, displayName: 'Maya Patel', bio: people[1].bio, photoUrl: null, metAt: 'HackGT Opening Mixer', contact: { requested: false, peerAccepted: false, peerPhone: null } },
+    { id: people[2].id, displayName: 'Chris Brooks', bio: people[2].bio, photoUrl: null, metAt: 'HackGT Opening Mixer', contact: { requested: false, peerAccepted: false, peerPhone: null } },
   ],
   edges: [
     { a: REQUESTER_ID, b: people[1].id },
@@ -286,8 +286,25 @@ export const groupFixture = {
     },
   ],
   unrevealedCount: 0,
-  activity: activityFixture,
+  activity: { ...activityFixture, id: 'mock-activity-current', createdAt: '2026-09-26T18:00:00.000Z' },
   activityStatus: 'ready',
+  // Wave 3: an earlier plan the group passed on, so the history UI has something to show in mock mode.
+  activityHistory: [
+    {
+      id: 'mock-activity-previous',
+      createdAt: '2026-09-26T17:20:00.000Z',
+      title: 'Bouldering session + tacos after',
+      venue: 'Stone Summit Midtown',
+      address: '1000 Marietta St NW, Atlanta, GA 30318',
+      lat: 33.7822,
+      lng: -84.4058,
+      priceCents: 2200,
+      startsAt: null,
+      source: 'maps',
+      sourceUrl: 'https://maps.google.com/?q=Stone+Summit+Midtown',
+      reasoning: 'Avery and Leo both boulder, and the taqueria next door keeps it cheap.',
+    },
+  ],
   completedAt: null,
   kind: 'matched',
   name: null,

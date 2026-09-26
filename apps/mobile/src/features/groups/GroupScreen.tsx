@@ -3,7 +3,9 @@
 // CHANGED Sep 26 (wave 2): one screen for both kinds. A meetup shows its room code + QR, everyone present with a
 // per-person "We met" (hidden once an edge exists), icebreakers, and "End meetup" (which connects everyone).
 // A matched group keeps accept/decline; once confirmed it gets the same per-person "We met" — completing a
-// matched group no longer connects people by itself. Both get "Leave" until they wrap up.
+// matched group no longer connects people by itself.
+// CHANGED Sep 26 (wave 3): "Leave" works at any point, including after it wrapped up — the hangout drops off your
+// list and every connection it formed stays. Meetups get "How did it go?" too. Members are labelled by degree.
 import type { Activity, GroupMember } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -28,7 +30,7 @@ import { useActivityJob } from '@/features/activity/useActivityJob';
 import { joinLink } from '@/features/events/links';
 import { api } from '@/lib/api';
 import { useSessionStore } from '@/stores/session';
-import { firstName, memberDegreeStyle, memberDisplayName } from './degrees';
+import { firstName, memberDegreeLabel, memberDisplayName } from './degrees';
 import { queryKeys, useGroup } from './queries';
 import {
   Avatar,
@@ -58,7 +60,7 @@ function MemberRow({
   isMeetup: boolean;
 }) {
   const queryClient = useQueryClient();
-  const style = memberDegreeStyle(member);
+  const degreeLabel = memberDegreeLabel(member);
   const name = member.degree === 0 ? 'You' : memberDisplayName(member);
   const tone = member.degree === 0 ? 'you' : member.revealed ? 'met' : 'unmet';
   const connect = useMutation({
@@ -75,10 +77,10 @@ function MemberRow({
       <View className="flex-1 gap-1">
         <View className="flex-row flex-wrap items-center gap-2">
           <Text className="font-body-semibold text-base text-ink">{name}</Text>
-          {member.degree > 0 && !isMeetup ? <DegreeBadge label={style.label} tone={tone} /> : null}
+          <DegreeBadge label={degreeLabel} tone={tone} />
         </View>
         {!member.revealed && member.degree > 0 ? (
-          <Muted>You'll see who they are once you've hung out together.</Muted>
+          <Muted>Past your 1st degree — you'll see who they are once you've hung out together.</Muted>
         ) : null}
         {member.revealed && member.bio ? <Muted numberOfLines={2}>{member.bio}</Muted> : null}
         {member.sharedInterests.length > 0 ? (
@@ -112,10 +114,12 @@ function MemberRow({
 function ActivityPreview({
   activity,
   activityStatus,
+  historyCount,
   onPress,
 }: {
   activity: Activity | null;
   activityStatus?: string | null;
+  historyCount: number;
   onPress: () => void;
 }) {
   const isGenerating =
@@ -129,7 +133,7 @@ function ActivityPreview({
             <Heading>The plan</Heading>
             <View className="flex-row items-center gap-1.5 rounded-full bg-sage/20 px-2.5 py-0.5">
               <Sparkles size={12} color="#5B7A6B" />
-              <Text className="font-body-semibold text-xs text-sage">AI Generating…</Text>
+              <Text className="font-body-semibold text-xs text-sage">AI generating…</Text>
             </View>
           </View>
           <View className="flex-row items-center gap-3 pt-1">
@@ -177,6 +181,11 @@ function ActivityPreview({
           </View>
           <ChevronRight size={20} color="#8A8378" />
         </View>
+        {historyCount > 0 ? (
+          <Muted>
+            {historyCount} earlier {historyCount === 1 ? 'plan' : 'plans'} kept — open to compare or bring one back.
+          </Muted>
+        ) : null}
       </Card>
     </Pressable>
   );
@@ -260,7 +269,7 @@ export function GroupScreen() {
       if (accept) invalidate();
       else {
         void queryClient.invalidateQueries({ queryKey: queryKeys.hangouts });
-        router.replace('/index');
+        router.dismissTo('/');
       }
     },
   });
@@ -277,15 +286,19 @@ export function GroupScreen() {
     mutationFn: () => api.leaveGroup(id!),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.hangouts });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.graph });
       queryClient.removeQueries({ queryKey: queryKeys.group(id!) });
-      router.replace('/index');
+      // Back to Home (already under this screen), never a fresh '/index' push — that path was "Unmatched Route".
+      router.dismissTo('/');
     },
   });
 
   const confirmLeave = () => {
     Alert.alert(
       isMeetup ? 'Leave this meetup?' : 'Leave this group?',
-      "You'll drop off the list and lose the chat. Everyone else keeps it.",
+      isCompleted
+        ? "It leaves your hangouts. Everyone you met here stays in your 1st degree, and your feedback and photos stay with the group."
+        : "You'll drop off the list and lose the chat. Everyone else keeps it — and anyone you've already marked \"We met\" stays in your 1st degree.",
       [
         { text: 'Stay', style: 'cancel' },
         { text: 'Leave', style: 'destructive', onPress: () => leave.mutate() },
@@ -340,6 +353,9 @@ export function GroupScreen() {
               <Muted>{format(parseISO(data.scheduledAt), 'EEEE, MMM d · h:mm a')}</Muted>
             ) : null}
             {isCompleted ? <Muted>{isMeetup ? 'Ended' : 'Wrapped up'} — chat and photos close 24h after.</Muted> : null}
+            {!isMeetup && data.unrevealedCount > 0 ? (
+              <Muted>{data.unrevealedCount} {data.unrevealedCount === 1 ? 'person is' : 'people are'} past your 1st degree — names unlock when you meet.</Muted>
+            ) : null}
           </View>
 
           {isInvited ? (
@@ -390,10 +406,10 @@ export function GroupScreen() {
           <Card>
             <Heading>{isMeetup ? `Here · ${data.members.length}` : `${data.members.length} people`}</Heading>
             {isMeetup && !isCompleted ? (
-              <Muted>Tap "We met" for anyone you actually talked to. Ending the meetup connects everyone anyway.</Muted>
+              <Muted>Tap "We met" for anyone you actually talked to — they become 1st degree. Ending the meetup connects everyone anyway.</Muted>
             ) : null}
             {!isMeetup && canMeet && !isCompleted ? (
-              <Muted>Tap "We met" once you've actually hung out — that's what puts them in your circle.</Muted>
+              <Muted>Tap "We met" once you've actually hung out — that's what makes them 1st degree.</Muted>
             ) : null}
             {data.members.map((member, index) => (
               <MemberRow
@@ -430,6 +446,7 @@ export function GroupScreen() {
               <ActivityPreview
                 activity={data.activity}
                 activityStatus={data.activityStatus}
+                historyCount={data.activityHistory.length}
                 onPress={() => router.push(`/groups/${id}/activity`)}
               />
 
@@ -445,36 +462,37 @@ export function GroupScreen() {
                   icon={<ImageIcon size={18} color="#20201C" />}
                   onPress={() => router.push(`/groups/${id}/photos`)}
                 />
-                {!isMeetup ? (
-                  <Button
-                    label="How did it go?"
-                    variant="secondary"
-                    icon={<Star size={18} color="#20201C" />}
-                    onPress={() => router.push(`/groups/${id}/feedback`)}
-                  />
-                ) : null}
+                {/* Wave 3: meetups get feedback too — it's the same per-person signal the matcher learns from. */}
+                <Button
+                  label="How did it go?"
+                  variant="secondary"
+                  icon={<Star size={18} color="#20201C" />}
+                  onPress={() => router.push(`/groups/${id}/feedback`)}
+                />
               </View>
 
-              {!isCompleted ? (
-                <View className="gap-3 pt-2">
-                  {/* Any member can end it (docs: "host or any member marks the hangout done"). */}
-                  <Button
-                    label={isMeetup ? 'End meetup' : 'Mark hangout as done'}
-                    variant="ghost"
-                    loading={complete.isPending}
-                    onPress={confirmEnd}
-                  />
-                  {complete.isError ? <Muted>{complete.error.message}</Muted> : null}
-                  <Button
-                    label={isMeetup ? 'Leave meetup' : 'Leave group'}
-                    variant="ghost"
-                    icon={<LogOut size={16} color="#20201C" />}
-                    loading={leave.isPending}
-                    onPress={confirmLeave}
-                  />
-                  {leave.isError ? <Muted>{leave.error.message}</Muted> : null}
-                </View>
-              ) : null}
+              <View className="gap-3 pt-2">
+                {!isCompleted ? (
+                  <>
+                    {/* Any member can end it (docs: "host or any member marks the hangout done"). */}
+                    <Button
+                      label={isMeetup ? 'End meetup' : 'Mark hangout as done'}
+                      variant="ghost"
+                      loading={complete.isPending}
+                      onPress={confirmEnd}
+                    />
+                    {complete.isError ? <Muted>{complete.error.message}</Muted> : null}
+                  </>
+                ) : null}
+                <Button
+                  label={isCompleted ? 'Remove from my hangouts' : isMeetup ? 'Leave meetup' : 'Leave group'}
+                  variant="ghost"
+                  icon={<LogOut size={16} color="#20201C" />}
+                  loading={leave.isPending}
+                  onPress={confirmLeave}
+                />
+                {leave.isError ? <Muted>{leave.error.message}</Muted> : null}
+              </View>
             </>
           )}
         </>

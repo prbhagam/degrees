@@ -10,10 +10,7 @@ import { Body, Button, Card, Chip, ErrorState, Field, Muted, Screen } from '@/co
 import { api } from '@/lib/api';
 import { queryKeys, useMe } from '@/features/groups/queries';
 import { useOnboardingFlow } from './flow';
-
-const AVOID_OPTIONS = [
-  'Alcohol', 'Late nights', 'Large crowds', 'High-intensity activity', 'Loud venues', 'Smoking',
-];
+import { AVOID_OPTIONS } from './options';
 
 // Canned demo output — a real build would call the server, which calls Gemini.
 const GENERATED_TAGS = ['Skateboarding', 'Cooking', 'Road Trips', 'Vintage Finds'];
@@ -78,7 +75,7 @@ export function AboutScreen() {
 
       <View className="mt-5 gap-6">
         <Field
-          label="Bio — visible to people you've met (1st degree)"
+          label="Bio — visible to your 1st degree (people you've met)"
           value={bio}
           onChangeText={setBio}
           multiline
@@ -139,6 +136,7 @@ export function AboutScreen() {
           <Text className="font-body-semibold text-[13px] text-muted">
             Anything you'd rather skip? <Text className="font-body">(optional)</Text>
           </Text>
+          <Muted className="mt-1">Hard rules for every plan you're in — pick "Alcohol" and none of your plans will be a bar.</Muted>
           <View className="mt-2 flex-row flex-wrap gap-2">
             {AVOID_OPTIONS.map((label) => (
               <Chip

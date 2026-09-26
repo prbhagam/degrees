@@ -152,6 +152,10 @@ export const feedbackRequestSchema = z.object({
 export const activityStatusSchema = z.enum(['generating', 'ready', 'failed']);
 
 export const activitySchema = z.object({
+  // Added Sep 26 (wave 3): set on saved plans so the app can list plan history and pick one to reuse. Absent on a
+  // plan the model has just produced and on the mock fixture.
+  id: z.string().optional(),
+  createdAt: z.iso.datetime().optional(),
   title: z.string(),
   venue: z.string(),
   address: z.string(),
@@ -201,6 +205,11 @@ export const respondRequestSchema = z.object({
   accept: z.boolean(),
 });
 
+// Added Sep 26 (wave 3): bring a previous plan back as the current one (see GroupResponse.activityHistory).
+export const restoreActivityRequestSchema = z.object({
+  activityId: z.string().min(1),
+});
+
 // ---- Added Sep 26 (wave 2): meetups as groups, leave, icebreakers ---------------------------
 export const hangoutKindSchema = z.enum(['matched', 'meetup']);
 
@@ -217,3 +226,10 @@ export const notificationTypeSchema = z.enum([
   'exchange_accepted',
   'connection_added',
 ]);
+
+// ---- Added Sep 26 (wave 3): contact exchange between 1st-degree connections (Your Circle) ----
+// Same mutual-consent rule as the per-group exchange, keyed on the connection pair instead of a group, so the
+// state survives leaving the group and shows wherever the person appears.
+export const contactExchangeRequestSchema = z.object({
+  peerId: z.uuid(),
+});

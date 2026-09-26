@@ -5,7 +5,7 @@
 // stack so nothing can be swiped back to.
 import { useEffect, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import type { Frequency } from '@degrees/shared';
 import { Pressable, Text, View } from 'react-native';
 import { Body, Button, Card, Chip, ErrorState, Muted, Screen, Stepper } from '@/components/ui';
@@ -13,10 +13,11 @@ import { queryKeys, useMe } from '@/features/groups/queries';
 import { api } from '@/lib/api';
 import { useOnboardingFlow } from './flow';
 
+// You are degree 0. Each step out is one "we met in person" edge further from you.
 const DEGREES = [
-  { value: 1, label: 'Just my friends', desc: 'People you have met in person.', reach: '12' },
-  { value: 2, label: 'Friends of friends', desc: 'One introduction away from you.', reach: '140', recommended: true },
-  { value: 3, label: 'Wider network', desc: 'The whole reachable circle.', reach: '900' },
+  { value: 1, label: '1st degree only', desc: 'Only people you have met in person.', reach: '12' },
+  { value: 2, label: 'Up to 2nd degree', desc: 'Your 1st degree, plus the people they have met.', reach: '140', recommended: true },
+  { value: 3, label: 'Up to 3rd degree', desc: 'Three introductions out — the whole reachable graph.', reach: '900' },
 ];
 
 const DISTANCES = ['Walking distance', 'Same city', 'Anywhere'] as const;
@@ -53,9 +54,12 @@ export function PreferencesScreen() {
   const me = useMe();
   const queryClient = useQueryClient();
   const router = useRouter();
-  const segments = useSegments();
-  // Opened from Profile as settings (not under /onboarding): no step counter, no skip, just save and go back.
-  const inOnboarding = (segments[0] as string | undefined) === 'onboarding';
+  // Opened from Profile as settings (`mode=settings`): no step counter, no skip, just save and go back.
+  // Wave 3: this used to key off the URL segment, but the route is /onboarding/preferences either way, so a
+  // settings save ran the onboarding exit (collapse the stack, replace with a home path the router didn't know)
+  // and landed on "Unmatched Route".
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const inOnboarding = mode !== 'settings';
 
   const [degree, setDegree] = useState(2);
   const [groupMin, setGroupMin] = useState(3);
@@ -99,10 +103,13 @@ export function PreferencesScreen() {
 
   return (
     <Screen>
-      <Stack.Screen options={{ title: 'Preferences', headerBackButtonDisplayMode: 'minimal' }} />
+      <Stack.Screen options={{ title: 'Degrees & preferences', headerBackButtonDisplayMode: 'minimal' }} />
       {inOnboarding ? <Muted>Step 3 of 3</Muted> : null}
-      <Text className="mt-2 font-display text-2xl text-ink">How far should we reach?</Text>
-      <Body className="mt-1 text-muted">The one dial that matters most — you can change this anytime.</Body>
+      <Text className="mt-2 font-display text-2xl text-ink">How many degrees out should we reach?</Text>
+      <Body className="mt-1 text-muted">
+        You're degree 0. The people you've met are your 1st degree, their people are your 2nd. This is the one dial
+        that matters most — change it anytime.
+      </Body>
 
       <View className="mt-4 gap-2.5">
         {DEGREES.map((option) => {

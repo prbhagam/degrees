@@ -141,6 +141,46 @@ async function withModelFallback<T>(
   }
 }
 
+// What each 'avoid' tag rules out, in venue terms the model can act on. Anything not listed is passed through as
+// "no <label>". Matching is case-insensitive on the label.
+const AVOID_RULES: Record<string, string> = {
+  alcohol:
+    'no bars, pubs, breweries, wineries, distilleries, cocktail lounges, or anything centred on drinking — pick a venue where alcohol is not the point',
+  'late nights': 'nothing that starts after 8pm or runs late',
+  'large crowds': 'no big crowds — skip stadiums, festivals, packed clubs, and busy nightlife',
+  'high-intensity activity': 'nothing physically demanding (no intense sports, long hikes, or workouts)',
+  'loud venues': 'no loud venues — skip concerts, clubs, and arcades',
+  smoking: 'no hookah lounges, cigar bars, or smoking venues',
+};
+
+// Everyone's avoids, de-duplicated, as hard rules. One person avoiding alcohol means the whole group's plan avoids it:
+// the plan is for the group, and "you can just not drink" is exactly what the tag opts out of.
+export function avoidRules(input: GenerateActivityInput): string[] {
+  const seen = new Set<string>();
+  const rules: string[] = [];
+  for (const member of input.members) {
+    for (const label of member.avoids) {
+      const key = label.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      rules.push(AVOID_RULES[key] ?? `no ${label.trim().toLowerCase()}`);
+    }
+  }
+  return rules;
+}
+
+// Does a venue name trip one of the group's hard avoids? A cheap guard on top of the prompt: the model is told the
+// rules, but a grounded reply can still name "The Local Pub"; better to fall through to the next stage than to
+// hand an alcohol-avoider a pub.
+const ALCOHOL_VENUE_PATTERN = /\b(bar|bars|pub|pubs|brewery|breweries|brewing|taproom|tap room|winery|wine bar|distillery|cocktail|saloon|beer|biergarten|beer garden|lounge)\b/i;
+export function violatesAvoids(venueOrTitle: string, input: GenerateActivityInput): string | null {
+  const avoids = new Set(input.members.flatMap((m) => m.avoids.map((a) => a.trim().toLowerCase())));
+  if (avoids.has('alcohol') && ALCOHOL_VENUE_PATTERN.test(venueOrTitle)) {
+    return `"${venueOrTitle}" looks alcohol-centred and someone here avoids alcohol.`;
+  }
+  return null;
+}
+
 function describeGroup(input: GenerateActivityInput): string {
   const members = input.members
     .map(
@@ -149,10 +189,30 @@ function describeGroup(input: GenerateActivityInput): string {
     )
     .join('\n');
   const { maxCostCents, maxTravelMi, city } = input.constraints;
+  const rules = avoidRules(input);
+  const avoidBlock =
+    rules.length > 0
+      ? `\n\nHARD RULES (someone in the group opted out of these — a plan that breaks one is wrong, even if it fits everyone else):\n${rules.map((rule) => `- ${rule}`).join('\n')}`
+      : '';
+  const previous =
+    input.previousVenues.length > 0
+      ? `\n\nAlready suggested to this group — do NOT pick any of these again, and prefer a different kind of activity from them: ${input.previousVenues.join('; ')}.`
+      : '';
   return `Group (${input.members.length} people, meeting in person, most of them just met):
 ${members}
 
-Constraints: at most $${(maxCostCents / 100).toFixed(0)} per person, within ${maxTravelMi} miles, in or near ${city}.`;
+Constraints: at most $${(maxCostCents / 100).toFixed(0)} per person, within ${maxTravelMi} miles, in or near ${city}.${avoidBlock}${previous}`;
+}
+
+// Same loose comparison assembleFromMaps uses, so "Your 3rd Spot - Westside" still counts as "Your 3rd Spot".
+const normalizeName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+export function isPreviousVenue(venue: string, input: GenerateActivityInput): boolean {
+  const wanted = normalizeName(venue);
+  if (!wanted) return false;
+  return input.previousVenues.some((previous) => {
+    const candidate = normalizeName(previous);
+    return candidate === wanted || candidate.startsWith(wanted) || wanted.startsWith(candidate);
+  });
 }
 
 // Models sometimes wrap JSON in prose or code fences; take the outermost object.
@@ -192,6 +252,13 @@ Reply with only a JSON object, no prose:
     },
   });
   const plan = groundedPlanSchema.parse(extractJson(response.text ?? ''));
+  const violation = violatesAvoids(`${plan.venue} ${plan.title}`, input);
+  if (violation) {
+    throw new Error(`Plan breaks an avoid rule: ${violation}`);
+  }
+  if (isPreviousVenue(plan.venue, input)) {
+    throw new Error(`Plan repeats an earlier venue: "${plan.venue}".`);
+  }
   const places = (
     response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []
   ).flatMap(({ maps }) =>
@@ -319,7 +386,7 @@ async function pickEvent(
         model,
         contents: `${describeGroup(input)}
 
-Pick the ONE upcoming event below this group would most enjoy together.
+Pick the ONE upcoming event below this group would most enjoy together. The hard rules above apply to the event too.
 
 ${listing}`,
         config: {
@@ -360,7 +427,10 @@ async function fromTicketmaster(
     )
   ).filter(
     (event) =>
-      event.minPriceCents === null || event.minPriceCents <= maxCostCents,
+      (event.minPriceCents === null || event.minPriceCents <= maxCostCents) &&
+      !isPreviousVenue(event.venue, input) &&
+      !input.previousVenues.some((previous) => normalizeName(previous) === normalizeName(event.name)) &&
+      violatesAvoids(`${event.name} ${event.venue}`, input) === null,
   );
   if (events.length === 0) {
     throw new Error('No affordable Ticketmaster events nearby.');

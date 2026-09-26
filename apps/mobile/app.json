@@ -45,7 +45,15 @@
       ],
       "expo-sqlite",
       "expo-font",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Degrees shows hangout photos you choose to save.",
+          "savePhotosPermission": "Degrees saves hangout photos to your library when you ask it to.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

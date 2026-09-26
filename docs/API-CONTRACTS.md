@@ -6,6 +6,8 @@ This file is what makes four people concurrent. It is implemented as TypeScript 
 
 **CHANGED Sep 26 (wave 2, Sahith's branch `sahith/wave2-fixes`)** — additive unless marked: `GET /api/hangouts`, `POST /api/groups/:id/leave`, `POST /api/groups/:id/icebreakers`; `GroupResponse` gains `kind`/`name`/`hostId`/`scheduledAt`/`roomCode`/`codeExpiresAt`/`icebreakers`; `GroupMember.met`; `JoinEventResponse` gains `groupId`/`hostId`/`scheduledAt`/`codeExpiresAt`/`endedAt` and `attendees[].alreadyMet`; `MeResponse` gains `profileStatus` + `preferences`; `Photo.url`; phone numbers are validated as US and stored E.164; `POST /api/match/run` returns 409 `profile_incomplete` until onboarding is done; `POST /api/events/:roomCode/join` returns 410 `event_code_expired`. Every response carries an `x-request-id` header that matches the server's log line.
 
+**CHANGED Sep 26 (wave 3, Sahith's branch `sahith/wave3-testing-fixes`)** — additive: `GroupResponse.activityHistory` (earlier plans, newest first) and `Activity.id`/`createdAt` on saved plans; `POST /api/groups/:id/activity/restore`; `POST /api/groups/:id/leave` now works on completed hangouts too (no more 409 `group_completed`); `GET /api/graph/me` nodes carry `contact` and `POST /api/graph/exchange` is the pair-keyed contact exchange (the per-group `exchange-*` routes stay for compatibility, the app no longer calls them); `GenerateActivityInput` members carry `avoids` and the input carries `previousVenues`. Needs migration `0010`.
+
 **Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
 **Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
 
@@ -58,9 +60,18 @@ POST /api/connections
   // edge to the hangout both people were at; the app refuses to show a scannable code otherwise.
 
 GET  /api/graph/me
-  → { nodes: { id, displayName, bio: string | null, photoUrl: string | null, metAt: string | null }[],   // CHANGED Sep 26
+  → { nodes: { id, displayName, bio: string | null, photoUrl: string | null, metAt: string | null,
+               contact: { requested: boolean, peerAccepted: boolean, peerPhone: string | null } }[],   // contact: Added wave 3
       edges: { a: string, b: string }[],
       mutualEdges: { a: string, b: string }[] }   // CHANGED Sep 26
+  // wave 3: `contact` is the saved phone-exchange state with that person (connection_contacts). `peerPhone` is
+  // non-null only once both sides have said yes — computed server-side, never client-set.
+
+// Added wave 3: mutual-consent phone exchange with a 1st-degree connection, keyed on the pair (not a group) so it
+// persists. One call marks the caller's side yes; the number comes back once both sides have. 404 peer_not_found
+// unless a connections edge exists between the two.
+POST /api/graph/exchange
+  { peerId: string } → ExchangeResponse
   // CHANGED Sep 26 — BREAKING: this ONLY ever returns 1st-degree connections (people actually
   // met). It is not a directory of the wider matching pool — that stays server-side, used only
   // by /match/run. `metAt` is the event name the connection formed at, if any. `mutualEdges` are
@@ -102,7 +113,8 @@ POST /api/match/run          // wave 2: 409 profile_incomplete until interests +
 GET  /api/groups/:id
   → { id, status, reasoning, members: GroupMember[], unrevealedCount: number,
       activity: Activity | null, completedAt: string | null,   // CHANGED Sep 26
-      kind, name, eventId, hostId, scheduledAt, roomCode, codeExpiresAt, icebreakers: string[] }   // Added wave 2
+      kind, name, eventId, hostId, scheduledAt, roomCode, codeExpiresAt, icebreakers: string[],   // Added wave 2
+      activityHistory: Activity[] }   // Added wave 3: earlier 'ready' plans, newest first, current one excluded
   // Meetup members are never redacted (they're in the same room); matched groups keep the rule below.
   // degree and sharedInterests are relative to the viewer (the JWT user)
 
@@ -139,7 +151,8 @@ POST /api/groups/:id/respond
 POST /api/groups/:id/complete
   → { ok: true }
 
-// Added wave 2: drop out of a proposed/confirmed group or a live meetup. 409 group_completed once it's history.
+// Added wave 2: drop out of a group or meetup. CHANGED wave 3: works on a completed hangout too — it leaves
+// your list; the connections it formed, your feedback, and your photos all stay. Only the membership row goes.
 POST /api/groups/:id/leave
   → { ok: true }
 
@@ -166,7 +179,13 @@ POST /api/groups/:id/activity/advance
   // 404 activity_not_found before any POST /activity. A concurrent advance returns status 'generating' with
   // the current stage and does no work (the running one holds a short lock).
 
+// Added wave 3: plans are kept, not replaced. Bring an earlier one (from GroupResponse.activityHistory) back as
+// the current plan — it's copied as a new row so history stays chronological. 404 activity_not_found otherwise.
+POST /api/groups/:id/activity/restore
+  { activityId: string } → Activity
+
 type Activity = {
+  id?: string; createdAt?: string;   // Added wave 3: set on saved plans (history + restore); absent on a fresh model reply
   title: string; venue: string; address: string;
   lat: number; lng: number;
   priceCents: number | null; startsAt: string | null;
@@ -199,6 +218,8 @@ POST /api/groups/:id/feedback
 // these for the same pair. Computed server-side from apps/server's contact_exchanges table —
 // never trust a client-supplied "accepted" flag. The two routes exist for clearer client copy
 // ("ask" vs "accept"); the server-side action is identical either way.
+// CHANGED wave 3: the app no longer uses these per-group routes. Exchange lives on Your Circle (1st degree) and is
+// keyed on the connection pair — see POST /api/graph/exchange below. These stay for compatibility.
 POST /api/groups/:id/exchange-request
   { peerId: string } → ExchangeResponse
 
@@ -245,6 +266,7 @@ Server-side only. Never exposed to the client, never called from the app.
 embedProfile(userId: string): Promise<void>
   // interests + aiParagraph + derived tags → gemini-embedding-001 @ 768 dims
   // → upsert profile_embeddings
+  // wave 3: 'avoid' tags are embedded on their own "Prefers to skip:" line, never under "Interests:".
 
 formGroups(input: {
   requesterId: string;
@@ -255,10 +277,14 @@ formGroups(input: {
   // On failure: fall back to top-N by vector similarity. Matching never hard-fails.
 
 generateActivity(input: {
-  members: { displayName, interests }[];
+  members: { displayName, interests, avoids }[];       // avoids: Added wave 3 — the member's 'avoid' tags
   constraints: { maxCostCents, maxTravelMi, city, lat, lng };
+  previousVenues: string[];                            // Added wave 3 — never suggested again for this group
 }): Promise<Activity>
   // Gemini Flash + Maps grounding. Ticketmaster is a secondary source.
+  // wave 3: every member's avoids become HARD RULES in the prompt (e.g. "Alcohol" → no bars/pubs/breweries…), a
+  // grounded reply that still names an alcohol-centred venue is rejected before Places, and Ticketmaster events
+  // are filtered the same way. Previously avoids were passed as interests, which is why pubs got recommended.
 
 analyzeFeedback(freeText: string): Promise<{
   tags: { label: string; kind: "derived" }[];
