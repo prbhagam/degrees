@@ -104,15 +104,15 @@ Written after PR #14 merged, from a full test pass. Local suite green: typecheck
 | Sahith | `0007`: trigger on `auth.users` that inserts the `profiles` row (id, username from the email's local part, display name), plus a backfill for existing auth users | Without it, `/me`, matching, and everything else fail for real new accounts |
 | Sahith | `formGroups`: never name degree-2+ members or their path in `reasoning` (hide their names from the prompt, reject replies that contain one, deterministic text says "plus N from your wider network") | Reasoning currently shows names the redaction hides |
 | Charles | Signup + login take a **username** and build `<username>@degrees.demo` (per decision 1) | Matches the seed and the 0007 trigger |
-| Pranav | `ScanScreen`: pass `eventId`/`eventName` through to `connect/[peerId]` | In-app person scans always fail with "missing event" (demo beat 1) |
-| Christian | Add `memberRows()` checks to `respond`, `complete`, `exchange-request/accept`, and `photos` | Any signed-in user with a group id can confirm or complete it, which forms edges between strangers |
+| Pranav | ~~`ScanScreen`: pass `eventId`/`eventName` through to `connect/[peerId]`~~ **Done** (falls back to the scanner's own event) | In-app person scans always fail with "missing event" (demo beat 1) |
+| Pranav | ~~Add `memberRows()` checks to `respond`, `complete`, `exchange-request/accept`, and `photos`~~ **Done** (was Christian's; these routes live in Pranav's `routes/groups.ts`) | Any signed-in user with a group id can confirm or complete it, which forms edges between strangers |
 
 ### Wave 2 — finish what the demo shows
 
 | Who | Task |
 |---|---|
 | Christian | Write notifications at the trigger points the demo hits: `hangout_invited` (match/run, per member), `feedback_prompt` (complete), `exchange_requested` / `exchange_accepted`, `connection_added`. Give the notifications screen a Realtime subscription and mark-as-read |
-| Christian | Photos `POST` returns `{ photos }` as the contract says; add its request schema to `packages/shared`; enforce the 24h lock server-side for photos and chat `POST` |
+| Pranav | ~~Photos `POST` returns `{ photos }` as the contract says; add its request schema to `packages/shared`; enforce the 24h lock server-side for photos and chat `POST`~~ **Done**; `complete` also sets `status: completed` now |
 | Christian | TestFlight build with `EXPO_PUBLIC_API_URL=https://degrees-api.netlify.app` (`api.degrees.tech` DNS is optional) |
 | Charles | Feedback: let the peer see and accept an incoming exchange request, remove the "(demo: they said yes)" link, and send or drop the group-tag chips |
 | Charles | About: send accepted generated tags as `hobby`/`activity`, not `derived` (the server drops `derived`). Making "Generate tags" real needs a small server endpoint (Christian): good for the "AI throughout" brief if there's time |

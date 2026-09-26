@@ -1,6 +1,7 @@
 // Owner: Pranav (Groups, Activities & Chat) — group view + activity; Christian owns the server framework.
 import { Hono } from 'hono';
 import {
+  addPhotoRequestSchema,
   exchangeRequestSchema,
   respondRequestSchema,
   type Activity,
@@ -17,8 +18,12 @@ import { ApiError, validateJson } from '../lib/errors.js';
 import { displayNames } from '../lib/graph.js';
 import {
   activityInput,
+  assertNotArchived,
   groupNotFound,
+  groupState,
+  isArchived,
   loadGroup,
+  memberRows,
   saveActivity,
 } from '../lib/groups.js';
 import type { AppEnv } from '../middleware/auth.js';
@@ -64,10 +69,19 @@ function exchangeKey(groupId: string, userA: string, userB: string): string {
   return `${groupId}:${[userA, userB].sort().join(':')}`;
 }
 
-function setMockAcceptance(groupId: string, userId: string, peerId: string): ExchangeState {
+function setMockAcceptance(
+  groupId: string,
+  userId: string,
+  peerId: string,
+): ExchangeState {
   const [a, b] = [userId, peerId].sort() as [string, string];
   const key = exchangeKey(groupId, userId, peerId);
-  const existing = mockExchanges.get(key) ?? { a, b, aAccepted: false, bAccepted: false };
+  const existing = mockExchanges.get(key) ?? {
+    a,
+    b,
+    aAccepted: false,
+    bAccepted: false,
+  };
   if (userId === a) existing.aAccepted = true;
   else existing.bAccepted = true;
   mockExchanges.set(key, existing);
@@ -81,8 +95,12 @@ function mockPhoneFor(id: string): string {
   return `+1-404-555-${digits}`;
 }
 
-function exchangeResponseFor(state: ExchangeState, viewerId: string): ExchangeResponse {
-  const viewerAccepted = viewerId === state.a ? state.aAccepted : state.bAccepted;
+function exchangeResponseFor(
+  state: ExchangeState,
+  viewerId: string,
+): ExchangeResponse {
+  const viewerAccepted =
+    viewerId === state.a ? state.aAccepted : state.bAccepted;
   const peerAccepted = viewerId === state.a ? state.bAccepted : state.aAccepted;
   const peerId = viewerId === state.a ? state.b : state.a;
   return {
@@ -119,6 +137,8 @@ export const groupRoutes = new Hono<AppEnv>()
       const response = { ok: true } satisfies OkResponse;
       return context.json(response);
     }
+    // Only members can accept or decline; accepting confirms the group for everyone (team decision 2).
+    await memberRows(groupId, userId);
     const db = getServiceClient();
     if (accept) {
       const { error } = await db
@@ -127,7 +147,11 @@ export const groupRoutes = new Hono<AppEnv>()
         .eq('id', groupId)
         .eq('status', 'proposed');
       if (error) {
-        throw new ApiError(500, 'update_failed', 'Failed to accept the hangout.');
+        throw new ApiError(
+          500,
+          'update_failed',
+          'Failed to accept the hangout.',
+        );
       }
     } else {
       // Decline removes only the caller, not the group — others may still want it.
@@ -137,7 +161,11 @@ export const groupRoutes = new Hono<AppEnv>()
         .eq('group_id', groupId)
         .eq('user_id', userId);
       if (error) {
-        throw new ApiError(500, 'update_failed', 'Failed to decline the hangout.');
+        throw new ApiError(
+          500,
+          'update_failed',
+          'Failed to decline the hangout.',
+        );
       }
     }
     const response = { ok: true } satisfies OkResponse;
@@ -160,29 +188,40 @@ export const groupRoutes = new Hono<AppEnv>()
     const groupId = context.req.param('id');
     if (env.mockMode) {
       assertMockGroup(groupId);
-      mockCompletedAt = new Date().toISOString();
+      mockCompletedAt ??= new Date().toISOString();
+      mockStatus = 'completed';
       const response = { ok: true } satisfies OkResponse;
       return context.json(response);
     }
+    // Completing connects every pair of members, so only a member may do it, and only once the
+    // group is confirmed: a still-proposed group is people who haven't agreed to meet.
+    const members = await memberRows(groupId, context.get('userId'));
+    const { status } = await groupState(groupId);
+    if (status === 'proposed') {
+      throw new ApiError(
+        409,
+        'group_not_confirmed',
+        'Accept the hangout before marking it done.',
+      );
+    }
     const db = getServiceClient();
+    // Only the first completion stamps the time, so a second tap can't restart the 24h window.
     const { error } = await db
       .from('groups')
-      .update({ completed_at: new Date().toISOString() })
-      .eq('id', groupId);
+      .update({ status: 'completed', completed_at: new Date().toISOString() })
+      .eq('id', groupId)
+      .is('completed_at', null);
     if (error) {
-      throw new ApiError(500, 'update_failed', 'Failed to mark the hangout done.');
+      throw new ApiError(
+        500,
+        'update_failed',
+        'Failed to mark the hangout done.',
+      );
     }
     // Attending a hangout together is how an edge forms (PRD: "an edge forms when two people meet
     // in person") — so completing the group connects every pair of confirmed members, revealing
     // them to each other from here on, instead of leaving that to a separate QR scan nobody does.
-    const { data: memberRows, error: memberError } = await db
-      .from('group_members')
-      .select('user_id')
-      .eq('group_id', groupId);
-    if (memberError) {
-      throw new Error(`group_members read failed: ${memberError.message}`);
-    }
-    const ids = memberRows.map((row) => row.user_id as string);
+    const ids = members.map((row) => row.user_id);
     const pairs = ids.flatMap((a, i) =>
       ids.slice(i + 1).map((b) => [a, b].sort() as [string, string]),
     );
@@ -233,37 +272,23 @@ export const groupRoutes = new Hono<AppEnv>()
       const response = { photos: mockPhotos } satisfies PhotosResponse;
       return context.json(response);
     }
-    const db = getServiceClient();
-    const { data, error } = await db
-      .from('event_photos')
-      .select('id, uploader_id, storage_path, created_at')
-      .eq('group_id', groupId)
-      .order('created_at', { ascending: true });
-    if (error) {
-      throw new Error(`event_photos read failed: ${error.message}`);
-    }
-    const uploaderIds = data.map((row) => row.uploader_id as string);
-    const names = await displayNames(uploaderIds);
-    const response = {
-      photos: data.map((row) => ({
-        id: row.id as string,
-        uploaderId: row.uploader_id as string,
-        uploaderName: names.get(row.uploader_id as string) ?? 'Someone',
-        storagePath: row.storage_path as string,
-        createdAt: row.created_at as string,
-      })),
-    } satisfies PhotosResponse;
+    await memberRows(groupId, context.get('userId'));
+    const response: PhotosResponse = { photos: await listPhotos(groupId) };
     return context.json(response);
   })
   .post('/groups/:id/photos', async (context) => {
     const groupId = context.req.param('id');
     const userId = context.get('userId');
-    const body = (await context.req.json()) as { storagePath?: string };
-    if (!body.storagePath) {
-      throw new ApiError(400, 'invalid_request', 'storagePath is required.');
-    }
+    const body = await validateJson(context, addPhotoRequestSchema);
     if (env.mockMode) {
       assertMockGroup(groupId);
+      if (isArchived(mockCompletedAt)) {
+        throw new ApiError(
+          403,
+          'hangout_archived',
+          'This hangout ended more than 24 hours ago, so it is read-only now.',
+        );
+      }
       const photo: Photo = {
         id: `mock-photo-${mockPhotos.length + 1}`,
         uploaderId: userId,
@@ -275,8 +300,9 @@ export const groupRoutes = new Hono<AppEnv>()
       const response = { photos: mockPhotos } satisfies PhotosResponse;
       return context.json(response);
     }
-    const db = getServiceClient();
-    const { error } = await db.from('event_photos').insert({
+    await memberRows(groupId, userId);
+    await assertNotArchived(groupId);
+    const { error } = await getServiceClient().from('event_photos').insert({
       group_id: groupId,
       uploader_id: userId,
       storage_path: body.storagePath,
@@ -284,9 +310,31 @@ export const groupRoutes = new Hono<AppEnv>()
     if (error) {
       throw new ApiError(500, 'save_failed', 'Failed to save the photo.');
     }
-    const response = { ok: true } satisfies OkResponse;
+    // The contract (and the app) expect the updated list back, not { ok }.
+    const response: PhotosResponse = { photos: await listPhotos(groupId) };
     return context.json(response);
   });
+
+async function listPhotos(groupId: string): Promise<Photo[]> {
+  const { data, error } = await getServiceClient()
+    .from('event_photos')
+    .select('id, uploader_id, storage_path, created_at')
+    .eq('group_id', groupId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    throw new Error(`event_photos read failed: ${error.message}`);
+  }
+  const names = await displayNames(
+    data.map((row) => row.uploader_id as string),
+  );
+  return data.map((row) => ({
+    id: row.id as string,
+    uploaderId: row.uploader_id as string,
+    uploaderName: names.get(row.uploader_id as string) ?? 'Someone',
+    storagePath: row.storage_path as string,
+    createdAt: new Date(row.created_at as string).toISOString(),
+  }));
+}
 
 // Shared real-mode path for both exchange-request and exchange-accept — the server-side action is
 // identical either way ("mark my side of this pair accepted"); the two routes exist for clearer
@@ -296,6 +344,15 @@ async function requestOrAcceptExchange(
   userId: string,
   peerId: string,
 ): Promise<ExchangeResponse> {
+  // Both people must be in this group: otherwise any member could open an exchange with anyone.
+  const rows = await memberRows(groupId, userId);
+  if (peerId === userId || !rows.some((row) => row.user_id === peerId)) {
+    throw new ApiError(
+      404,
+      'peer_not_found',
+      'That person is not in this group.',
+    );
+  }
   const db = getServiceClient();
   const [userA, userB] = [userId, peerId].sort() as [string, string];
   const { data: existing, error: readError } = await db

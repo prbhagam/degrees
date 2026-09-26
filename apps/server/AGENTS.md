@@ -43,7 +43,8 @@ When a route goes real, replace its fixture return with the real query but keep 
 - Type every response with the `@degrees/shared` type (`satisfies MatchRunResponse`, etc.) so a wrong shape fails `npm run typecheck`.
 - **Idempotency:** `POST /api/connections` and `POST /api/events/:roomCode/join` must be safe to repeat. Sort the connection pair so `user_a < user_b` before inserting, and upsert rather than insert.
 - Money is integer cents. Timestamps are ISO 8601 UTC strings (`new Date().toISOString()`).
-- **Every `/groups/:id/*` route checks membership** with `memberRows()` from `lib/groups.ts` (404 for non-members, so group ids don't leak). As of Sep 26 `respond`, `complete`, `exchange-*`, and `photos` don't yet — see Known gaps.
+- **Every `/groups/:id/*` route checks membership** with `memberRows()` from `lib/groups.ts` (404 for non-members, so group ids don't leak). Exchange also requires the peer to be in the group, and `complete` requires the group to be past `proposed` (409 otherwise), because it connects every pair of members.
+- **Chat and photo `POST`s close 24h after `completed_at`** (`assertNotArchived()`, 403 `hangout_archived`). `complete` stamps `completed_at` only once, so a second tap can't reopen the window.
 - **Identity past 1st degree is redacted server-side** (`lib/groups.ts` `loadGroup`, `routes/match.ts`): no id, name, bio, or photo until an edge exists or the group is confirmed. Any new response that includes people must apply the same rule, including free text such as `reasoning`.
 - Add new routes by exporting a sub-app from `src/routes/` and mounting it in `app.ts`. Contract changes go through [packages/shared](../../packages/shared/AGENTS.md) first.
 
@@ -67,7 +68,5 @@ Physical phones reach the dev server over your LAN IP. The server listens on all
 
 Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
 - **New users get no `profiles` row.** `PUT /api/profile` only updates, and nothing inserts on signup, so `GET /api/me` 404s for a real new account.
-- **Missing membership checks**: `POST /groups/:id/respond` (one member's accept confirms the group for everyone), `POST /groups/:id/complete` (forms edges between every member), `exchange-request`/`exchange-accept`, and `GET/POST /groups/:id/photos`.
 - **No notification writes.** The `notifications` table and the client read exist; no route inserts rows at invite, message, feedback-due, exchange, or connection time.
-- **Photos**: the real `POST` returns `{ ok }` but the contract and the app expect `{ photos }`; the body isn't Zod-validated; the 24h lock isn't enforced (nor for chat `POST`).
-- `POST /groups/:id/complete` sets `completed_at` but leaves `status` unchanged.
+- **Photos** store a path but nothing uploads an image yet (no bucket, no picker); see ROLES decision 3.

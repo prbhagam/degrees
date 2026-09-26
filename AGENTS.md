@@ -99,8 +99,6 @@ No `.env` is needed to start. The server runs in **mock mode**, accepting any be
 **Known gaps** (owners and order: [docs/ROLES.md](./docs/ROLES.md#next-steps-sep-26)):
 - New signups get no `profiles` row, so `/api/me` and matching fail for any real new account; signup also asks for email, not username.
 - `formGroups` reasoning names people the redaction hides.
-- In-app person-QR scans drop the event id, so "connect" always fails from the scanner.
-- `respond`, `complete`, exchange, and photos routes don't check group membership.
 - No route writes notifications; photos don't upload to Storage; the About screen's "Generate tags" is canned.
 
 **Open questions** are at the end of [PRD.md](./PRD.md): Resend usage, the frequency scheduler, and username vs email login. The graph view is resolved (Your Circle). [HANDOFF-SKELETON.md](./HANDOFF-SKELETON.md) is the original web-era brief, kept for history.

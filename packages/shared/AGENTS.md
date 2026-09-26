@@ -21,7 +21,7 @@
 
 ## Open contract gaps
 
-Search for `CONTRACT GAP` in `src/types.ts`. Three remain (Sep 26): nullable profile fields in `GET /me`, the message id type (bigserial sent as a string), and the `formGroups` candidate prefs shape. The group-members gap was resolved by PR #14's `revealed` shape. Also missing: a request schema for `POST /groups/:id/photos`, whose real response (`{ ok }`) doesn't match the `PhotosResponse` type.
+Search for `CONTRACT GAP` in `src/types.ts`. Three remain (Sep 26): nullable profile fields in `GET /me`, the message id type (bigserial sent as a string), and the `formGroups` candidate prefs shape. The group-members gap was resolved by PR #14's `revealed` shape. `POST /groups/:id/photos` now has `addPhotoRequestSchema` and returns `PhotosResponse` (Pranav, Sep 26).
 
 ## Sep 26 contract update (PR #14)
 

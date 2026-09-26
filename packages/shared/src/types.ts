@@ -9,13 +9,15 @@ import type {
   feedbackRequestSchema,
   notificationTypeSchema,
   respondRequestSchema,
+  addPhotoRequestSchema,
   sendMessageRequestSchema,
   updatePreferencesRequestSchema,
   updateProfileRequestSchema,
 } from './schemas';
 
 // CHANGED Sep 26: added biweekly + few_times_week (see schemas.ts).
-export type Frequency = 'daily' | 'few_times_week' | 'weekly' | 'biweekly' | 'monthly';
+export type Frequency =
+  'daily' | 'few_times_week' | 'weekly' | 'biweekly' | 'monthly';
 export type ConnectionContext = 'qr' | 'event' | 'group' | 'manual';
 export type TagKind = 'hobby' | 'activity' | 'derived' | 'avoid';
 export type GroupStatus = 'proposed' | 'confirmed' | 'completed';
@@ -55,6 +57,7 @@ export type FeedbackRequest = z.infer<typeof feedbackRequestSchema>;
 export type CreateEventRequest = z.infer<typeof createEventRequestSchema>;
 export type ExchangeRequest = z.infer<typeof exchangeRequestSchema>;
 export type RespondRequest = z.infer<typeof respondRequestSchema>;
+export type AddPhotoRequest = z.infer<typeof addPhotoRequestSchema>;
 
 export interface OkResponse {
   ok: true;
@@ -70,7 +73,13 @@ export interface CreateConnectionResponse extends OkResponse {
 export interface GraphResponse {
   // CHANGED Sep 26: added bio/photoUrl for Circle's tap-to-view-profile — safe to include because
   // every node here is already a 1st-degree connection (exploreFrom(viewerId, 1)), never a stranger.
-  nodes: { id: string; displayName: string; bio: string | null; photoUrl: string | null; metAt: string | null }[];
+  nodes: {
+    id: string;
+    displayName: string;
+    bio: string | null;
+    photoUrl: string | null;
+    metAt: string | null;
+  }[];
   edges: { a: string; b: string }[];
   mutualEdges: { a: string; b: string }[];
 }
@@ -81,7 +90,12 @@ export interface JoinEventResponse {
   // CHANGED Sep 26: bio/photoUrl added — the event lobby shows everyone present, not gated on the
   // connections graph. This does not itself form a connection edge; that's still the explicit
   // "We met" action per attendee (JoinRoomScreen / POST /connections).
-  attendees: { id: string; displayName: string; bio: string | null; photoUrl: string | null }[];
+  attendees: {
+    id: string;
+    displayName: string;
+    bio: string | null;
+    photoUrl: string | null;
+  }[];
 }
 
 // CHANGED Sep 26 — BREAKING: previously every member's real displayName + a `via` chain was sent
