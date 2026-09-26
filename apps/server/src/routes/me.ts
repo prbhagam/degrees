@@ -5,6 +5,13 @@ import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from '../lib/errors.js';
 import type { AppEnv } from '../middleware/auth.js';
+import {
+  computeProfileStatus,
+  isProfileComplete,
+  PREFERENCES_COLUMNS,
+  toPreferences,
+  type PreferencesRow,
+} from '../lib/profileStatus.js';
 import { meFixture } from '../mocks/fixtures.js';
 
 export const meRoutes = new Hono<AppEnv>().get('/me', async (context) => {
@@ -16,13 +23,14 @@ export const meRoutes = new Hono<AppEnv>().get('/me', async (context) => {
   const userId = context.get('userId');
   const supabase = getServiceClient();
 
-  const [profileResult, tagsResult] = await Promise.all([
+  const [profileResult, tagsResult, prefsResult] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, username, display_name, bio, ai_paragraph, city, phone, pronouns, photo_url')
       .eq('id', userId)
       .single(),
     supabase.from('profile_tags').select('label, kind').eq('user_id', userId),
+    supabase.from('preferences').select(PREFERENCES_COLUMNS).eq('user_id', userId).maybeSingle(),
   ]);
   const { data, error } = profileResult;
 
@@ -32,6 +40,17 @@ export const meRoutes = new Hono<AppEnv>().get('/me', async (context) => {
   if (tagsResult.error) {
     throw new Error(`profile_tags read failed: ${tagsResult.error.message}`);
   }
+  if (prefsResult.error) {
+    throw new Error(`preferences read failed: ${prefsResult.error.message}`);
+  }
+  const prefsRow = (prefsResult.data as PreferencesRow | null) ?? null;
+  // CHANGED Sep 26 (wave 2): "complete" now means every onboarding step, not just name + city, and the
+  // breakdown ships too so the app can say exactly what's missing (and skip-onboarding can nag instead of block).
+  const profileStatus = computeProfileStatus({
+    city: data.city as string | null,
+    tagKinds: tagsResult.data.map((row) => row.kind as string),
+    preferences: prefsRow,
+  });
 
   const response: MeResponse = {
     id: data.id,
@@ -47,7 +66,9 @@ export const meRoutes = new Hono<AppEnv>().get('/me', async (context) => {
       label: row.label as string,
       kind: row.kind as TagKind,
     })),
-    hasCompletedProfile: Boolean(data.display_name && data.city),
+    hasCompletedProfile: isProfileComplete(profileStatus),
+    profileStatus,
+    preferences: toPreferences(prefsRow),
   };
 
   return context.json(response);

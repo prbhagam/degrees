@@ -44,11 +44,51 @@ export function authEmailFor(usernameOrEmail: string): string {
   return value.includes('@') ? value : `${value}@${AUTH_EMAIL_DOMAIN}`;
 }
 
+// ---- Phone numbers (Added Sep 26, wave 2): US only for now ------------------------------------
+// Stored as E.164 (+1XXXXXXXXXX); shown as (404) 555-0148. Both apps format with these so the server never
+// sees a half-typed string and the app never shows a raw one.
+export function normalizeUsPhone(input: string): string | null {
+  const digits = input.replace(/\D/g, '');
+  const national =
+    digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  // NANP: area code and exchange can't start with 0 or 1.
+  if (!/^[2-9]\d{2}[2-9]\d{6}$/.test(national)) return null;
+  return `+1${national}`;
+}
+
+export function formatUsPhone(input: string): string {
+  const digits = input.replace(/\D/g, '');
+  const national =
+    digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits.slice(0, 10);
+  const area = national.slice(0, 3);
+  const exchange = national.slice(3, 6);
+  const line = national.slice(6, 10);
+  if (national.length === 0) return '';
+  if (national.length < 4) return `(${area}`;
+  if (national.length < 7) return `(${area}) ${exchange}`;
+  return `(${area}) ${exchange}-${line}`;
+}
+
+export const usPhoneSchema = z
+  .string()
+  .trim()
+  .transform((value, context) => {
+    const normalized = normalizeUsPhone(value);
+    if (!normalized) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Enter a 10-digit US phone number.',
+      });
+      return z.NEVER;
+    }
+    return normalized;
+  });
+
 export const signupRequestSchema = z.object({
   username: usernameSchema,
   password: z.string().min(8, 'Passwords need at least 8 characters.'),
   displayName: z.string().trim().min(1, 'Add your name.'),
-  phone: z.string().trim().min(7, 'Add a phone number.'),
+  phone: usPhoneSchema,
   pronouns: z.string().trim().optional(),
 });
 
@@ -57,8 +97,9 @@ export const updateProfileRequestSchema = z.object({
   bio: z.string(),
   aiParagraph: z.string(),
   city: z.string(),
-  // CHANGED Sep 26: onboarding now collects these at signup / edit-profile.
-  phone: z.string(),
+  // CHANGED Sep 26: onboarding now collects these at signup / edit-profile. Wave 2: normalized to E.164 when
+  // present; '' is allowed for accounts created before phone was collected.
+  phone: z.union([z.literal(''), usPhoneSchema]),
   pronouns: z.string().optional(),
   photoUrl: z.url().optional(),
   tags: z.array(
@@ -108,6 +149,8 @@ export const feedbackRequestSchema = z.object({
   freeText: z.string().optional(),
 });
 
+export const activityStatusSchema = z.enum(['generating', 'ready', 'failed']);
+
 export const activitySchema = z.object({
   title: z.string(),
   venue: z.string(),
@@ -119,6 +162,7 @@ export const activitySchema = z.object({
   source: activitySourceSchema,
   sourceUrl: z.string().nullable(),
   reasoning: z.string(),
+  status: activityStatusSchema.optional(),
 });
 
 export const analyzeFeedbackOutputSchema = z.object({
@@ -155,6 +199,13 @@ export const addPhotoRequestSchema = z.object({
 // A proposed group ('status: proposed') needs a real way to say no — previously there was none.
 export const respondRequestSchema = z.object({
   accept: z.boolean(),
+});
+
+// ---- Added Sep 26 (wave 2): meetups as groups, leave, icebreakers ---------------------------
+export const hangoutKindSchema = z.enum(['matched', 'meetup']);
+
+export const generateIcebreakersOutputSchema = z.object({
+  icebreakers: z.array(z.string().trim().min(1)).min(3).max(8),
 });
 
 export const notificationTypeSchema = z.enum([

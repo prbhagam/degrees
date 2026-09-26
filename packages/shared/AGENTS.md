@@ -26,3 +26,7 @@ Search for `CONTRACT GAP` in `src/types.ts`. Three remain (Sep 26): nullable pro
 ## Sep 26 contract update (PR #14)
 
 Breaking: `GroupMember` lost `via` and gained `bio`, `photoUrl`, and `revealed` (id and name are null past 1st degree); feedback `peers[].wouldMeetAgain` became `relationship: 'great' | 'fine' | 'not_for_me'`; `GET /graph/me` returns only 1st-degree nodes plus `mutualEdges`. Added: `respond`, `complete`, contact exchange, photos, host events, notifications (mock-only route). [API-CONTRACTS.md](../../docs/API-CONTRACTS.md) marks each with "CHANGED/Added Sep 26".
+
+## Sep 26 async activities update
+- Added `ActivityStatus` ('generating' | 'ready' | 'failed') and optional `status` to `activitySchema`.
+- Added `activityStatus?: ActivityStatus | null;` to `GroupResponse` to support async AI generation.

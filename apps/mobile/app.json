@@ -7,7 +7,10 @@
     "icon": "./assets/images/icon.png",
     "scheme": "degrees",
     "userInterfaceStyle": "automatic",
-    "platforms": ["ios", "android"],
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "ios": {
       "bundleIdentifier": "tech.degrees.app",
       "supportsTablet": false,
@@ -41,7 +44,8 @@
         }
       ],
       "expo-sqlite",
-      "expo-font"
+      "expo-font",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -2,7 +2,7 @@
 import type { Notification } from '@degrees/shared';
 import { formatDistanceToNowStrict, parseISO } from 'date-fns';
 import { Stack, useRouter, type Href } from 'expo-router';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { ErrorState, LoadingState, Muted, Screen } from '@/components/ui';
 import { useNotifications } from './queries';
 
@@ -23,11 +23,11 @@ function targetFor(notification: Notification): Href {
     case 'hangout_invited':
     case 'hangout_forming':
     case 'message_received':
-      return id ? { pathname: '/groups/[id]', params: { id } } : '/';
+      return id ? { pathname: '/groups/[id]', params: { id } } : '/index';
     case 'feedback_prompt':
     case 'exchange_requested':
     case 'exchange_accepted':
-      return id ? { pathname: '/groups/[id]/feedback', params: { id } } : '/';
+      return id ? { pathname: '/groups/[id]/feedback', params: { id } } : '/index';
     case 'connection_added':
       return '/circle';
   }
@@ -38,7 +38,11 @@ export function NotificationsScreen() {
   const notifications = useNotifications();
 
   return (
-    <Screen>
+    <Screen
+      refreshControl={
+        <RefreshControl refreshing={notifications.isRefetching} onRefresh={() => void notifications.refetch()} />
+      }
+    >
       <Stack.Screen options={{ title: 'Notifications' }} />
       {notifications.isPending ? <LoadingState label="Loading…" /> : null}
       {notifications.isError ? (

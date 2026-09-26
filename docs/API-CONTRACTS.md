@@ -4,6 +4,8 @@
 
 This file is what makes four people concurrent. It is implemented as TypeScript types + Zod schemas in [`packages/shared`](../packages/shared/src) — change both together. Frontend builds against stubs matching these shapes; the server fills them in. Nobody blocks after H2.
 
+**CHANGED Sep 26 (wave 2, Sahith's branch `sahith/wave2-fixes`)** — additive unless marked: `GET /api/hangouts`, `POST /api/groups/:id/leave`, `POST /api/groups/:id/icebreakers`; `GroupResponse` gains `kind`/`name`/`hostId`/`scheduledAt`/`roomCode`/`codeExpiresAt`/`icebreakers`; `GroupMember.met`; `JoinEventResponse` gains `groupId`/`hostId`/`scheduledAt`/`codeExpiresAt`/`endedAt` and `attendees[].alreadyMet`; `MeResponse` gains `profileStatus` + `preferences`; `Photo.url`; phone numbers are validated as US and stored E.164; `POST /api/match/run` returns 409 `profile_incomplete` until onboarding is done; `POST /api/events/:roomCode/join` returns 410 `event_code_expired`. Every response carries an `x-request-id` header that matches the server's log line.
+
 **Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
 **Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
 
@@ -29,7 +31,9 @@ GET  /api/me
   → { id, username, displayName, bio, aiParagraph, city,
       phone, pronouns, photoUrl,             // CHANGED Sep 26
       tags: { label, kind }[],               // CHANGED Sep 26 — was write-only; see below
-      hasCompletedProfile: boolean }
+      hasCompletedProfile: boolean,          // CHANGED wave 2: every onboarding step done (was name + city)
+      profileStatus: { interests, about, preferences },   // Added wave 2 — what's still missing
+      preferences: UpdatePreferencesRequest | null }      // Added wave 2 — so the preferences screen prefills
 
 PUT  /api/profile
   { displayName, bio, aiParagraph, city,
@@ -64,9 +68,14 @@ GET  /api/graph/me
   // friends already know each other" view). bio/photoUrl (Added Sep 26) are safe here — every
   // node is already 1st-degree — and back Circle's tap-a-node-to-view-profile card.
 
-// ---- Events ---------------------------------------------------------------
+// ---- Events / meetups -----------------------------------------------------
+// CHANGED wave 2: a joinable event is a *meetup* — a `groups` row with kind 'meetup' — so everything a matched
+// group has (chat, plan, photos, leave) works for it. The `events` row is its room-code record.
 POST /api/events/:roomCode/join
-  → { eventId, name, attendees: { id, displayName, bio: string | null, photoUrl: string | null }[] }
+  → { eventId, groupId, name, hostId, scheduledAt, codeExpiresAt, endedAt,
+      attendees: { id, displayName, bio: string | null, photoUrl: string | null, alreadyMet: boolean }[] }
+  // 410 event_code_expired once the code is past codeExpiresAt (24h after scheduledAt, or creation) or the
+  // meetup has ended. Existing members can always re-open the lobby. Idempotent.
   // bio/photoUrl (Added Sep 26): the event lobby shows everyone present regardless of the
   // connections graph — Charles: "when joining event, all members should be able to see name,
   // bio, pfp." This does NOT auto-form a connection edge; that's still the explicit "We met"
@@ -76,9 +85,15 @@ POST /api/events/:roomCode/join
 POST /api/events
   { name, description?, scheduledAt?: string, city?, groupSizeMin, groupSizeMax }
   → { eventId: string, roomCode: string }
+  // wave 2: also creates the backing group (kind 'meetup', status 'confirmed') with the host as a member.
+
+// Added wave 2: one list for Home — matched groups and meetups together, active first then past.
+GET  /api/hangouts
+  → { hangouts: { id, kind: "matched"|"meetup", name, status, reasoning, memberCount, formedAt,
+                  scheduledAt, completedAt, roomCode (meetups, while valid), hostId, isPast }[] }
 
 // ---- Matching -------------------------------------------------------------
-POST /api/match/run
+POST /api/match/run          // wave 2: 409 profile_incomplete until interests + home base + preferences exist
   → { groupId: string,
       members: GroupMember[],
       unrevealedCount: number,      // CHANGED Sep 26
@@ -86,7 +101,9 @@ POST /api/match/run
 
 GET  /api/groups/:id
   → { id, status, reasoning, members: GroupMember[], unrevealedCount: number,
-      activity: Activity | null, completedAt: string | null }   // CHANGED Sep 26
+      activity: Activity | null, completedAt: string | null,   // CHANGED Sep 26
+      kind, name, eventId, hostId, scheduledAt, roomCode, codeExpiresAt, icebreakers: string[] }   // Added wave 2
+  // Meetup members are never redacted (they're in the same room); matched groups keep the rule below.
   // degree and sharedInterests are relative to the viewer (the JWT user)
 
 // CHANGED Sep 26 — BREAKING: previously every member's real displayName + a `via` chain was
@@ -98,6 +115,7 @@ type GroupMember = {
   degree: number;                  // 0 = you, 1 = met in person, 2+ = network (never shown as a number)
   sharedInterests: string[];       // kept even when redacted — not identifying on its own
   revealed: boolean;
+  met: boolean;                    // Added wave 2: a connections edge exists with the viewer (drives "We met")
   // CHANGED Sep 26: revealed = degree <= 1 OR the group's status is no longer "proposed". Accepting
   // a proposed group is treated as committing to meet, so a still-degree-2 groupmate becomes
   // revealed the moment the group is confirmed — otherwise ChatScreen (which needs a real sender
@@ -114,11 +132,21 @@ POST /api/groups/:id/respond
   // accept: true sets status "confirmed". accept: false removes only the caller from
   // group_members — other members may still want the hangout.
 
-// Added Sep 26 — marks the hangout done; starts the 24h chat/photo archive clock, and forms a
-// connections edge between every pair of confirmed members (attending together is how an edge
-// forms — see PRD).
+// Added Sep 26 — marks the hangout done; starts the 24h chat/photo archive clock.
+// CHANGED wave 2 (team decision): who gets connected depends on the kind. Ending a *meetup* connects every
+// pair of members (met_context 'event') and closes its code. Completing a *matched* group connects nobody —
+// edges there form only through the per-person "We met" (POST /api/connections, context 'group').
 POST /api/groups/:id/complete
   → { ok: true }
+
+// Added wave 2: drop out of a proposed/confirmed group or a live meetup. 409 group_completed once it's history.
+POST /api/groups/:id/leave
+  → { ok: true }
+
+// Added wave 2: Gemini-written conversation starters for exactly who's in the group (text only). Any member
+// can regenerate; the set replaces the previous one and comes back on GET /api/groups/:id.
+POST /api/groups/:id/icebreakers
+  → { icebreakers: string[] }
 
 // ---- Activity -------------------------------------------------------------
 POST /api/groups/:id/activity
@@ -171,11 +199,13 @@ type ExchangeResponse = {
 
 // ---- Photos (Added Sep 26) --------------------------------------------------
 GET  /api/groups/:id/photos
-  → { photos: { id, uploaderId, uploaderName, storagePath, createdAt }[] }
+  → { photos: { id, uploaderId, uploaderName, storagePath, url, createdAt }[] }
+  // wave 2: `url` is a signed read URL (~1h) for the private `event-photos` bucket; null if signing failed.
 
 POST /api/groups/:id/photos
   { storagePath: string }        // client uploads the image to Supabase Storage first, then
-  → { photos: [...] }            // posts the resulting path here
+  → { photos: [...] }            // posts the resulting path here — wave 2: must be `<groupId>/<file>` inside
+                                 // the event-photos bucket (storage policies in migration 0007 enforce the same)
   // Locked (both read the list and post) once completedAt + 24h has passed — see docs/DATA-MODEL.md.
   // Uploads close at the 24h mark; the list itself stays browsable after that.
 
@@ -225,13 +255,17 @@ analyzeFeedback(freeText: string): Promise<{
 
 ---
 
+## Writes that bypass the server (Storage only — Added wave 2)
+
+The client uploads image bytes **directly to Supabase Storage** under the storage policies in migration 0007, then tells the API about the object: `event-photos/<groupId>/<file>` (private bucket; only members of that group may write or read the folder; the API returns signed URLs) and `avatars/<userId>/<file>` (public bucket; only the owner may write; the public URL is saved via `PUT /api/profile` `photoUrl`). No client ever writes a database row.
+
 ## Reads that bypass the server
 
 The client reads these **directly from Supabase** with the anon key, under RLS — no server round-trip:
 
 - own profile and preferences
 - group member list for groups you belong to
-- chat messages (via Supabase Realtime subscription)
+- chat messages (via Supabase Realtime subscription) — **wave 2:** the app must call `supabase.realtime.setAuth(session.access_token)` before subscribing. Verified Sep 26 against the shared project: without it the channel reports `SUBSCRIBED` but RLS evaluates as `anon` and no row is ever delivered; with it the insert arrives. That was the "chat never updates live" bug.
 - your own notifications (via Supabase Realtime subscription) — Added Sep 26
 
 **Everything else, and every write, goes through the API server.**

@@ -1,8 +1,10 @@
 // Owner: shared mobile scaffold (Charles) — providers + root Stack. Feature owners add screens as files
 // under src/app/ that re-export from src/features/<feature>/, so this file should rarely change.
+// CHANGED Sep 26 (wave 2): the query cache persists to disk (PersistQueryClientProvider), the app refetches on
+// foreground, and the auth/onboarding screens can't be swiped back to from inside the app.
 import '../global.css';
 import { useEffect } from 'react';
-import { QueryClientProvider } from '@tanstack/react-query';
+import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
@@ -14,10 +16,14 @@ import {
   PublicSans_700Bold,
 } from '@expo-google-fonts/public-sans';
 import { AuthGate, useAuthSubscription } from '@/features/auth/session';
-import { queryClient } from '@/lib/query';
+import { persistOptions, queryClient, subscribeQueryFocus } from '@/lib/query';
 import { useSessionStore } from '@/stores/session';
 
 SplashScreen.preventAutoHideAsync();
+subscribeQueryFocus();
+
+// Screens that are entry points, not history: once you're past them there's nothing to go "back" to.
+const NO_BACK = { gestureEnabled: false, headerBackVisible: false } as const;
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -40,7 +46,7 @@ export default function RootLayout() {
   if (!fontsLoaded || authLoading) return null;
 
   return (
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
       <Stack
         screenOptions={{
           headerBackButtonDisplayMode: 'minimal',
@@ -51,10 +57,14 @@ export default function RootLayout() {
           contentStyle: { backgroundColor: '#F7F3EC' },
         }}
       >
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false, ...NO_BACK }} />
+        <Stack.Screen name="login" options={NO_BACK} />
+        <Stack.Screen name="onboarding/interests" options={NO_BACK} />
+        {/* about/preferences keep their back gesture: stepping back within onboarding is fine, and
+            preferences doubles as a settings screen pushed from Profile. */}
       </Stack>
       <AuthGate />
       <StatusBar style="auto" />
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   );
 }

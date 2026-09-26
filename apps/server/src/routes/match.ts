@@ -9,6 +9,8 @@ import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from '../lib/errors.js';
 import { profileBasics } from '../lib/graph.js';
+import { log, timed } from '../lib/log.js';
+import { firstMissingStep, loadProfileStatus } from '../lib/profileStatus.js';
 import { formGroups } from '../matching/formGroups.js';
 import { narrow } from '../matching/narrow.js';
 import { traverse } from '../matching/traverse.js';
@@ -74,6 +76,19 @@ export const matchRoutes = new Hono<AppEnv>().post(
     const userId = context.get('userId');
     const supabase = getServiceClient();
 
+    // Added Sep 26 (wave 2): onboarding can be skipped, but matching can't run without it — the pipeline needs
+    // interests to embed, a home base to centre on, and preferences for reach/size. The app reads the code and
+    // sends the person to the missing step, then back here.
+    const { status: profileStatus } = await loadProfileStatus(userId);
+    const missing = firstMissingStep(profileStatus);
+    if (missing) {
+      throw new ApiError(
+        409,
+        'profile_incomplete',
+        `Finish the ${missing} step of your profile before matching — the matcher can't work without it.`,
+      );
+    }
+
     const [profileResult, tagsResult, prefsResult] = await Promise.all([
       supabase
         .from('profiles')
@@ -109,8 +124,13 @@ export const matchRoutes = new Hono<AppEnv>().post(
     ];
     const prefs = effectivePrefs(prefsResult.data as PreferencesRow | null);
 
-    const pool = await traverse(userId, prefs.maxDegrees);
-    const candidates = await narrow(userId, pool, prefs);
+    const pool = await timed('match.traverse', { userId, maxDegrees: prefs.maxDegrees }, () =>
+      traverse(userId, prefs.maxDegrees),
+    );
+    const candidates = await timed('match.narrow', { userId, pool: pool.length }, () =>
+      narrow(userId, pool, prefs),
+    );
+    log.info('match.candidates', { userId, pool: pool.length, candidates: candidates.length });
     if (candidates.length === 0) {
       throw new ApiError(
         422,
@@ -145,7 +165,8 @@ export const matchRoutes = new Hono<AppEnv>().post(
       ]),
     );
 
-    const group = await formGroups(
+    const group = await timed('match.formGroups', { userId, candidates: candidates.length }, () =>
+      formGroups(
       {
         requesterId: userId,
         candidates: candidates.map((c) => ({
@@ -168,6 +189,7 @@ export const matchRoutes = new Hono<AppEnv>().post(
           ]),
         ),
       },
+      ),
     );
 
     const byId = new Map(candidates.map((c) => [c.id, c]));
@@ -189,6 +211,7 @@ export const matchRoutes = new Hono<AppEnv>().post(
     if (createError || typeof groupId !== 'string') {
       queryFailed('group creation', createError);
     }
+    log.info('match.group_created', { userId, groupId, members: group.memberIds.length });
 
     const mine = new Set(requesterInterests.map((l) => l.toLowerCase()));
     const sharedWith = (interests: string[]) =>
@@ -212,6 +235,7 @@ export const matchRoutes = new Hono<AppEnv>().post(
           everyoneElse.has(label.toLowerCase()),
         ),
         revealed: true,
+        met: false,
       },
       ...others.map((c): MatchRunResponse['members'][number] =>
         c.degree <= 1
@@ -223,6 +247,7 @@ export const matchRoutes = new Hono<AppEnv>().post(
               degree: c.degree,
               sharedInterests: sharedWith(c.interests),
               revealed: true,
+              met: c.degree === 1,
             }
           : {
               id: null,
@@ -232,6 +257,7 @@ export const matchRoutes = new Hono<AppEnv>().post(
               degree: c.degree,
               sharedInterests: sharedWith(c.interests),
               revealed: false,
+              met: false,
             },
       ),
     ];

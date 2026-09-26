@@ -8,11 +8,13 @@ import {
   type ExchangeResponse,
   type GenerateActivityInput,
   type GroupResponse,
+  type IcebreakersResponse,
   type OkResponse,
   type Photo,
   type PhotosResponse,
 } from '@degrees/shared';
 import { generateActivity } from '../ai/generateActivity.js';
+import { generateIcebreakers } from '../ai/generateIcebreakers.js';
 import { env } from '../config/env.js';
 import { ApiError, validateJson } from '../lib/errors.js';
 import { displayNames } from '../lib/graph.js';
@@ -21,14 +23,25 @@ import {
   assertNotArchived,
   groupNotFound,
   groupState,
+  icebreakersInput,
   isArchived,
+  leaveGroup,
   loadGroup,
+  meetupForGroup,
   memberRows,
   saveActivity,
+  saveIcebreakers,
+  setActivityGenerating,
 } from '../lib/groups.js';
+import { log, timed } from '../lib/log.js';
 import type { AppEnv } from '../middleware/auth.js';
-import { DEMO_GROUP_ID, groupFixture, people } from '../mocks/fixtures.js';
+import { DEMO_GROUP_ID, groupFixture, icebreakersFixture, people } from '../mocks/fixtures.js';
 import { getServiceClient } from '../db/supabase.js';
+
+// Signed read URLs for the private event-photos bucket; long enough to browse an album, short enough that a
+// leaked link goes stale.
+const PHOTO_URL_TTL_SECONDS = 60 * 60;
+export const PHOTO_BUCKET = 'event-photos';
 
 const mockActivityInput = {
   members: people.slice(0, 4).map(({ displayName, interests }) => ({
@@ -49,9 +62,11 @@ let mockActivity: Activity | null = groupFixture.activity;
 let mockCompletedAt: string | null = null;
 let mockStatus: GroupResponse['status'] = groupFixture.status;
 const mockPhotos: Photo[] = [];
+let mockIcebreakers: string[] = [];
+let mockLeft = false;
 
 function assertMockGroup(groupId: string): void {
-  if (groupId !== DEMO_GROUP_ID) {
+  if (groupId !== DEMO_GROUP_ID || mockLeft) {
     throw groupNotFound();
   }
 }
@@ -119,11 +134,49 @@ export const groupRoutes = new Hono<AppEnv>()
         ...groupFixture,
         status: mockStatus,
         activity: mockActivity,
+        activityStatus: mockActivity ? 'ready' : null,
         completedAt: mockCompletedAt,
+        icebreakers: mockIcebreakers,
       } satisfies GroupResponse;
       return context.json(response);
     }
     const response = await loadGroup(groupId, context.get('userId'));
+    return context.json(response);
+  })
+  // Added Sep 26 (wave 2): drop out of a group or meetup that hasn't wrapped up. See lib/groups.ts leaveGroup.
+  .post('/groups/:id/leave', async (context) => {
+    const groupId = context.req.param('id');
+    const userId = context.get('userId');
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      if (mockStatus === 'completed') {
+        throw new ApiError(409, 'group_completed', 'This hangout already happened, so it stays in your history.');
+      }
+      mockLeft = true;
+      const response = { ok: true } satisfies OkResponse;
+      return context.json(response);
+    }
+    await leaveGroup(groupId, userId);
+    log.info('groups.left', { userId, groupId });
+    const response = { ok: true } satisfies OkResponse;
+    return context.json(response);
+  })
+  // Added Sep 26 (wave 2): Gemini-written conversation starters for the people in this group. Any member can
+  // (re)generate; the set replaces the previous one and is returned by GET /groups/:id as `icebreakers`.
+  .post('/groups/:id/icebreakers', async (context) => {
+    const groupId = context.req.param('id');
+    const userId = context.get('userId');
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      mockIcebreakers = icebreakersFixture.icebreakers;
+      const response = { icebreakers: mockIcebreakers } satisfies IcebreakersResponse;
+      return context.json(response);
+    }
+    const input = await icebreakersInput(groupId, userId);
+    const icebreakers = await generateIcebreakers(input);
+    await saveIcebreakers(groupId, icebreakers);
+    log.info('groups.icebreakers', { userId, groupId, count: icebreakers.length });
+    const response = { icebreakers } satisfies IcebreakersResponse;
     return context.json(response);
   })
   // Added Sep 26: a proposed group previously had no way to say no.
@@ -173,16 +226,46 @@ export const groupRoutes = new Hono<AppEnv>()
   })
   .post('/groups/:id/activity', async (context) => {
     const groupId = context.req.param('id');
+    const userId = context.get('userId');
     if (env.mockMode) {
       assertMockGroup(groupId);
       mockActivity = await generateActivity(mockActivityInput);
       const response: Activity = mockActivity;
       return context.json(response);
     }
-    const input = await activityInput(groupId, context.get('userId'));
-    const response: Activity = await generateActivity(input);
-    await saveActivity(groupId, response);
-    return context.json(response);
+    // Christian (PR #22): answer in <100ms with a 'generating' placeholder, then generate off the request path —
+    // a Netlify Background Function in production (up to 15 min), an un-awaited task in local dev. The app
+    // subscribes to `activities` and polls every 2s until the row flips to 'ready' (features/groups/queries.ts).
+    await memberRows(groupId, userId);
+    const placeholder = await setActivityGenerating(groupId);
+
+    const isNetlify = Boolean(process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
+    if (isNetlify) {
+      const netlifyUrl = process.env.URL || 'https://degrees-api.netlify.app';
+      fetch(`${netlifyUrl}/.netlify/functions/activity-background`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupId, userId }),
+      })
+        .then((response) => {
+          log.info('activity.background.invoked', { groupId, userId, status: response.status });
+        })
+        .catch((error: unknown) => {
+          log.error('activity.background.invoke_failed', error, { groupId, userId });
+        });
+    } else {
+      void (async () => {
+        try {
+          const input = await activityInput(groupId, userId);
+          const activity = await timed('ai.activity', { groupId }, () => generateActivity(input));
+          await saveActivity(groupId, activity, 'ready');
+        } catch (error) {
+          log.error('activity.background.local_failed', error, { groupId, userId });
+        }
+      })();
+    }
+
+    return context.json(placeholder);
   })
   .post('/groups/:id/complete', async (context) => {
     const groupId = context.req.param('id');
@@ -193,11 +276,11 @@ export const groupRoutes = new Hono<AppEnv>()
       const response = { ok: true } satisfies OkResponse;
       return context.json(response);
     }
-    // Completing connects every pair of members, so only a member may do it, and only once the
-    // group is confirmed: a still-proposed group is people who haven't agreed to meet.
-    const members = await memberRows(groupId, context.get('userId'));
-    const { status } = await groupState(groupId);
-    if (status === 'proposed') {
+    const userId = context.get('userId');
+    const members = await memberRows(groupId, userId);
+    const { status, kind } = await groupState(groupId);
+    // A still-proposed matched group is people who haven't agreed to meet.
+    if (kind === 'matched' && status === 'proposed') {
       throw new ApiError(
         409,
         'group_not_confirmed',
@@ -205,10 +288,11 @@ export const groupRoutes = new Hono<AppEnv>()
       );
     }
     const db = getServiceClient();
+    const now = new Date().toISOString();
     // Only the first completion stamps the time, so a second tap can't restart the 24h window.
     const { error } = await db
       .from('groups')
-      .update({ status: 'completed', completed_at: new Date().toISOString() })
+      .update({ status: 'completed', completed_at: now })
       .eq('id', groupId)
       .is('completed_at', null);
     if (error) {
@@ -218,25 +302,45 @@ export const groupRoutes = new Hono<AppEnv>()
         'Failed to mark the hangout done.',
       );
     }
-    // Attending a hangout together is how an edge forms (PRD: "an edge forms when two people meet
-    // in person") — so completing the group connects every pair of confirmed members, revealing
-    // them to each other from here on, instead of leaving that to a separate QR scan nobody does.
-    const ids = members.map((row) => row.user_id);
-    const pairs = ids.flatMap((a, i) =>
-      ids.slice(i + 1).map((b) => [a, b].sort() as [string, string]),
-    );
-    if (pairs.length > 0) {
-      const { error: connectError } = await db.from('connections').upsert(
-        pairs.map(([userA, userB]) => ({
-          user_a: userA,
-          user_b: userB,
-          met_context: 'group' as const,
-        })),
-        { onConflict: 'user_a,user_b', ignoreDuplicates: true },
-      );
-      if (connectError) {
-        throw new Error(`connections insert failed: ${connectError.message}`);
+
+    // CHANGED Sep 26 (wave 2, team decision): who gets connected depends on the kind.
+    //  * meetup — everyone there scanned a code in the same room, so ending it connects every pair
+    //    (met_context 'event', tied to the event). The room code closes at the same time.
+    //  * matched — completing no longer auto-connects. Edges form only through the explicit per-person
+    //    "We met" (POST /connections, context 'group'), same as the event lobby.
+    if (kind === 'meetup') {
+      const meetup = await meetupForGroup(groupId);
+      if (meetup) {
+        const { error: endError } = await db
+          .from('events')
+          .update({ ended_at: now })
+          .eq('id', meetup.id)
+          .is('ended_at', null);
+        if (endError) {
+          throw new Error(`events update failed: ${endError.message}`);
+        }
       }
+      const ids = members.map((row) => row.user_id);
+      const pairs = ids.flatMap((a, i) =>
+        ids.slice(i + 1).map((b) => [a, b].sort() as [string, string]),
+      );
+      if (pairs.length > 0) {
+        const { error: connectError } = await db.from('connections').upsert(
+          pairs.map(([userA, userB]) => ({
+            user_a: userA,
+            user_b: userB,
+            met_context: 'event' as const,
+            event_id: meetup?.id ?? null,
+          })),
+          { onConflict: 'user_a,user_b', ignoreDuplicates: true },
+        );
+        if (connectError) {
+          throw new Error(`connections insert failed: ${connectError.message}`);
+        }
+      }
+      log.info('groups.meetup_ended', { userId, groupId, members: ids.length, pairs: pairs.length });
+    } else {
+      log.info('groups.completed', { userId, groupId, members: members.length });
     }
     const response = { ok: true } satisfies OkResponse;
     return context.json(response);
@@ -294,6 +398,7 @@ export const groupRoutes = new Hono<AppEnv>()
         uploaderId: userId,
         uploaderName: 'You',
         storagePath: body.storagePath,
+        url: null,
         createdAt: new Date().toISOString(),
       };
       mockPhotos.push(photo);
@@ -302,6 +407,11 @@ export const groupRoutes = new Hono<AppEnv>()
     }
     await memberRows(groupId, userId);
     await assertNotArchived(groupId);
+    // The app uploads to event-photos/<groupId>/<file>; a path pointing at another group's folder is refused so
+    // the pointer table can't reference an image the storage policy wouldn't have allowed.
+    if (!body.storagePath.startsWith(`${groupId}/`)) {
+      throw new ApiError(400, 'invalid_request', 'storagePath must be inside this group\'s folder.');
+    }
     const { error } = await getServiceClient().from('event_photos').insert({
       group_id: groupId,
       uploader_id: userId,
@@ -324,16 +434,41 @@ async function listPhotos(groupId: string): Promise<Photo[]> {
   if (error) {
     throw new Error(`event_photos read failed: ${error.message}`);
   }
-  const names = await displayNames(
-    data.map((row) => row.uploader_id as string),
-  );
+  const paths = data.map((row) => row.storage_path as string);
+  const [names, urls] = await Promise.all([
+    displayNames(data.map((row) => row.uploader_id as string)),
+    signedPhotoUrls(paths),
+  ]);
   return data.map((row) => ({
     id: row.id as string,
     uploaderId: row.uploader_id as string,
     uploaderName: names.get(row.uploader_id as string) ?? 'Someone',
     storagePath: row.storage_path as string,
+    url: urls.get(row.storage_path as string) ?? null,
     createdAt: new Date(row.created_at as string).toISOString(),
   }));
+}
+
+// Batch-sign read URLs for the private bucket. A signing failure (missing object, bucket not created yet) yields
+// null for that photo rather than failing the album.
+async function signedPhotoUrls(paths: string[]): Promise<Map<string, string>> {
+  const urls = new Map<string, string>();
+  if (paths.length === 0) return urls;
+  try {
+    const signed = await timed('storage.sign', { bucket: PHOTO_BUCKET, count: paths.length }, async () => {
+      const { data, error } = await getServiceClient()
+        .storage.from(PHOTO_BUCKET)
+        .createSignedUrls(paths, PHOTO_URL_TTL_SECONDS);
+      if (error) throw error;
+      return data;
+    });
+    for (const entry of signed) {
+      if (entry.signedUrl && entry.path) urls.set(entry.path, entry.signedUrl);
+    }
+  } catch {
+    // Logged by timed(); the album renders placeholders.
+  }
+  return urls;
 }
 
 // Shared real-mode path for both exchange-request and exchange-accept — the server-side action is

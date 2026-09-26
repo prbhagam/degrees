@@ -6,6 +6,8 @@ Owned by Sahith. Argue with it at H0, then freeze — four people build against 
 
 Implemented in [`supabase/migrations/0001_init.sql`](../supabase/migrations/0001_init.sql). Its header lists every addition beyond this doc (UUID defaults, `event_attendees` FKs, enum checks, indexes, RLS policies, the Realtime publication).
 
+**CHANGED Sep 26 (wave 2)** — one model for groups and meetups: `groups.kind` (`'matched' | 'meetup'`); every `events` row (the room code) now has a backing `groups` row (`events.group_id`), attendees are `group_members`, codes expire (`events.code_expires_at`) and close on `events.ended_at`; `group_icebreakers`; Storage buckets `event-photos` (private) and `avatars` (public) with policies. Implemented in [`0007_meetups_icebreakers_storage.sql`](../supabase/migrations/0007_meetups_icebreakers_storage.sql), which backfills a group for every existing event. Verified on a throwaway Postgres (`supabase/tests/run-local.sh`); **not yet applied to the shared project** — apply it together with deploying the wave-2 server, since the new join route requires `events.group_id`.
+
 **CHANGED Sep 26** — validated design work added phone/pronouns/photo to profiles, host-created events, mutual-consent contact exchange, event photos, and notifications; redefined `feedback_peers` and widened `preferences.frequency`. Implemented additively in [`supabase/migrations/0006_contact_events_photos_notifications.sql`](../supabase/migrations/0006_contact_events_photos_notifications.sql) (renumbered from 0003 while rebasing onto main, which had independently added 0003–0005; this migration also redefines `match_narrow` to score the renamed `relationship` field instead of `would_meet_again`) — **unverified against a real Postgres/Supabase project**; apply to a dev project before the shared one. Every change below is marked inline.
 
 ---
@@ -63,9 +65,12 @@ connections (
   check (user_a < user_b)          -- canonical ordering: store each edge once
 )
 
--- Events (icebreakers) ----------------------------------------------------
+-- Events = meetups' room-code records (CHANGED wave 2) ----------------------
 events (
   id                uuid primary key,
+  group_id          uuid references groups unique,   -- wave 2: the backing kind='meetup' group
+  code_expires_at   timestamptz,   -- wave 2: joins refused after this (24h past scheduled_at, else creation)
+  ended_at          timestamptz,   -- wave 2: set by POST /groups/:id/complete on a meetup; closes the code
   room_code         text unique not null,
   name              text,
   city              text,
@@ -80,13 +85,27 @@ events (
 event_attendees (event_id uuid, user_id uuid, joined_at timestamptz,
                  primary key (event_id, user_id))
 
--- Matching output ---------------------------------------------------------
+-- Groups: matched (auto-generated, non-joinable) AND meetups (joinable) ---
 groups (
   id            uuid primary key,
+  kind          text not null default 'matched',   -- wave 2: 'matched' | 'meetup'
+  name          text,              -- wave 2: meetups carry the host's name for it
+  created_by    uuid references profiles,          -- wave 2: meetup host
+  scheduled_at  timestamptz,       -- wave 2: when the meetup happens
   formed_at     timestamptz default now(),
-  reasoning     text,              -- Gemini's explanation, shown in the UI
-  status        text,              -- 'proposed' | 'confirmed' | 'completed'
+  reasoning     text,              -- Gemini's explanation, shown in the UI (matched only)
+  status        text,              -- 'proposed' | 'confirmed' | 'completed' (meetups start 'confirmed')
   completed_at  timestamptz        -- CHANGED Sep 26: chat + photos go read-only 24h after this
+)
+
+-- wave 2: Gemini-written conversation starters, one ordered set per group (regenerating replaces it)
+group_icebreakers (
+  id            uuid primary key,
+  group_id      uuid references groups,
+  position      int,
+  prompt        text not null,
+  created_at    timestamptz default now(),
+  unique (group_id, position)
 )
 
 group_members (
@@ -196,13 +215,15 @@ notifications (
 
 **CHANGED Sep 26 — identity is redacted past 1st degree, at the API layer, not RLS.** `group_members.degree` is unchanged (matching still reasons over the full graph up to `max_degrees`), but `GET /api/groups/:id` and `POST /api/match/run` now null out `id`/`displayName`/`bio`/`photoUrl` for any member with `degree > 1` **and** whose group is still `status: 'proposed'` — `revealed = degree <= 1 || status !== 'proposed'`. Accepting a proposed group is treated as committing to meet, so a still-degree-2 groupmate is revealed the moment the group is confirmed (otherwise chat, which needs a real sender name to coordinate, would show identity that the group view was redacting for the same person). `GET /api/groups/:id/messages`' `senderName` follows this same computed set. See [API-CONTRACTS.md](./API-CONTRACTS.md). This is enforced in `apps/server/src/lib/groups.ts`, not a new RLS policy, since the redaction is per-viewer, per-request, and (for the status half) per-group-state, not a fixed row-level rule.
 
-**CHANGED Sep 26 — attending a hangout forms the edge.** `POST /api/groups/:id/complete` (host or any member marks the hangout done) now inserts a `connections` row for every pair of confirmed `group_members`, `met_context = 'group'`. This is in addition to the existing QR/event-join paths, and is what makes newly-revealed groupmates show up in `GET /api/graph/me` afterward.
+**CHANGED Sep 26 (wave 2) — which hangouts form edges.** Team decision: a *meetup* is people who scanned a code in the same room, so ending it (`POST /api/groups/:id/complete` on a kind='meetup' group) inserts a `connections` row for every pair of members (`met_context = 'event'`, `event_id` set) and stamps `events.ended_at`. A *matched* group is auto-generated, so completing it connects nobody; its edges form only through the explicit per-person "We met" (`POST /api/connections`, `met_context = 'group'`), which the group screen offers once the group is confirmed. (This reverses the earlier "completing a matched group connects everyone" rule.)
+
+**Meetup codes expire.** `events.code_expires_at` is 24h after `scheduled_at` (or after creation when unscheduled); `POST /api/events/:code/join` answers 410 after that or once `ended_at` is set. Existing members can still open the lobby.
 
 **Added Sep 26 — the event lobby is a display-only exception, not a graph exception.** `POST /api/events/:roomCode/join` returns real name/bio/photo for every attendee regardless of the connections graph (Charles: co-presence at an event is enough to show basic info in the lobby). It deliberately does **not** insert `connections` rows for the whole room — that stays the explicit, one-at-a-time "We met" action (`JoinRoomScreen` → `POST /api/connections`, `met_context: 'event'`), which is what Circle's degree math and the redaction rule above actually depend on. Considered and rejected: auto-connecting every co-attendee pair on join, which would make Circle show people you never actually talked to as "met."
 
 **Contact exchange never has client grants.** `contact_exchanges` has RLS enabled but zero policies — every read and write goes through the API server (service-role), because whether a phone number is revealed must be computed server-side from both `a_accepted`/`b_accepted` flags, never trusted from the client.
 
-**`event_photos`' bucket is a manual step.** The table above only stores the pointer; creating the Supabase Storage bucket (e.g. `event-photos`) and its access policy is a dashboard/CLI action, not something this migration does.
+**Storage (wave 2, migration 0007).** Two buckets, created and policed by SQL: `event-photos` (private; objects live at `<group_id>/<file>`; `storage.objects` policies let `authenticated` insert/select only where `is_group_member(<folder>)`; the API returns signed URLs) and `avatars` (public; `<user_id>/<file>`; only the owner may insert/update/delete; the public URL is stored in `profiles.photo_url`). Avatars are public by design: the URL is unguessable and the app shows photos to groupmates and 1st-degree connections anyway.
 
 ---
 

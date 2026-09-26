@@ -5,7 +5,8 @@
 import type { Notification } from '@degrees/shared';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { currentSession } from '@/features/groups/queries';
+import { currentSession, queryKeys } from '@/features/groups/queries';
+import { LIVE_POLL_MS } from '@/lib/query';
 import { getSupabaseClient } from '@/lib/supabase';
 
 async function fetchNotifications(): Promise<Notification[]> {
@@ -31,5 +32,6 @@ async function fetchNotifications(): Promise<Notification[]> {
 }
 
 export function useNotifications() {
-  return useQuery({ queryKey: ['notifications'], queryFn: fetchNotifications });
+  // Wave 2: one-minute polling while focused, until the Realtime subscription lands (Christian, ROLES.md).
+  return useQuery({ queryKey: queryKeys.notifications, queryFn: fetchNotifications, refetchInterval: LIVE_POLL_MS });
 }

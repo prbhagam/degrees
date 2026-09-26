@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Owner: Sahith (Data & Matching) — applies 0001 + 0003-0006 to a throwaway local Postgres and runs matching.sql + privacy.sql.
+# Owner: Sahith (Data & Matching) — applies 0001 + 0003-0008 to a throwaway local Postgres and runs matching.sql + privacy.sql.
 # Never touches the shared Supabase project. Requires Homebrew postgresql + pgvector.
 set -euo pipefail
 
@@ -46,6 +46,25 @@ psql_run -f "$migrations/0003_matching_functions.sql"
 psql_run -f "$migrations/0004_meet_again_boost.sql"
 psql_run -f "$migrations/0005_profile_location_privacy.sql"
 psql_run -f "$migrations/0006_contact_events_photos_notifications.sql"
+
+# Storage shim for 0007: Supabase's storage schema (buckets, objects, foldername) doesn't exist in plain Postgres.
+psql_run <<'SQL'
+create schema storage;
+create table storage.buckets (
+  id text primary key, name text not null, public boolean default false,
+  file_size_limit bigint, allowed_mime_types text[]
+);
+create table storage.objects (
+  id uuid primary key default gen_random_uuid(), bucket_id text references storage.buckets(id),
+  name text, owner uuid, created_at timestamptz default now()
+);
+alter table storage.objects enable row level security;
+create function storage.foldername(name text) returns text[] language sql immutable
+  as $$ select (string_to_array(name, '/'))[1:array_length(string_to_array(name, '/'), 1) - 1] $$;
+grant usage on schema storage to anon, authenticated, service_role;
+SQL
+psql_run -f "$migrations/0007_meetups_icebreakers_storage.sql"
+psql_run -f "$migrations/0008_activity_status_and_realtime.sql"
 psql_run -f "$here/matching.sql"
 echo "matching.sql: all assertions passed"
 psql_run -f "$here/privacy.sql"
