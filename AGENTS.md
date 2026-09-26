@@ -53,6 +53,6 @@ The AI's job is getting people offline, not keeping them scrolling.
 
 ## Status
 
-Pre-build as of Sep 25, 2026. Docs are written; the codebase skeleton is Sahith's next step.
+Pre-build as of Sep 25, 2026. Docs are written; the codebase skeleton is the next step — see [HANDOFF-SKELETON.md](./HANDOFF-SKELETON.md) for that brief.
 
 **Open questions** are listed at the end of [PRD.md](./PRD.md) — Resend usage, the graph view, and the frequency scheduler.
