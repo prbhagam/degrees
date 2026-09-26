@@ -10,7 +10,7 @@ import {
   Heading,
   Muted,
   Screen,
-} from '@/features/groups/ui';
+} from '@/components/ui';
 
 export function JoinScreen() {
   const router = useRouter();
@@ -35,19 +35,19 @@ export function JoinScreen() {
           onChangeText={setCode}
           onSubmitEditing={join}
           placeholder="HACKGT"
-          placeholderTextColor="#a3a3a3"
+          placeholderTextColor="#8A8378"
           autoCapitalize="characters"
           autoCorrect={false}
           returnKeyType="go"
           maxLength={16}
-          className="rounded-xl border border-neutral-300 bg-neutral-50 px-4 py-3 text-center text-2xl font-bold tracking-[6px] text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-white"
+          className="rounded-m border border-line bg-paper px-4 py-3 text-center font-display text-2xl tracking-[6px] text-ink"
         />
         <Button label="Join" disabled={!valid} onPress={join} />
       </Card>
       <Button
         label="Scan a QR code"
         variant="secondary"
-        icon={<ScanLine size={18} color="#737373" />}
+        icon={<ScanLine size={18} color="#20201C" />}
         onPress={() => router.push('/scan')}
       />
       <Muted>Joining is instant. You can finish your profile later.</Muted>

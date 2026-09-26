@@ -29,6 +29,8 @@ The server everything else depends on, and the deploy pipeline that makes it rea
 - Supabase service-role client; the anon-read / service-write split
 - `@google/genai` wrapper; **all four AI calls live here**
 - `generateActivity` (Maps grounding) and `analyzeFeedback`
+- **Notifications** *(Added Sep 26)* — server writes at each trigger point (invite, message, feedback due, exchange request/accept, new connection); client reads its own rows directly from Supabase + Realtime, same pattern as chat. `GET /api/notifications` exists only for mock mode.
+- **Contact exchange** *(Added Sep 26)* — server-mediated only, `contact_exchanges` has zero client grants; a phone number is computed and returned only once both sides have accepted
 - Expo/EAS project and TestFlight builds; env and secret management
 - **Deliverable:** a **public URL with a working health check by H4** — not H25
 - **Boundary:** Christian owns the server framework, auth, deploy, and the Gemini client. Sahith owns schema and the matching module inside it.
@@ -39,9 +41,11 @@ Everything from signup to a complete profile, plus the feedback loop.
 
 - H0–H2: shared component kit on the Expo scaffold (`apps/mobile`, already routed) — the "build once" burst everyone consumes
 - Supabase auth screens (username + password)
-- **Interests page** — tag selection, bio, optional AI paragraph
+- **Interests page** — tag selection (common tags + type-your-own), bio, optional AI paragraph
+- **About page** *(Added Sep 26)* — bio, AI-paragraph-to-tags, optional "avoids" list
 - **Preferences page** — cost, distance, frequency, **group size range**, **degrees of separation**
-- **Post-event feedback** — rating scale, per-person "meet again?", optional free text
+- **Edit profile page** *(Added Sep 26)* — the settings-side counterpart to onboarding
+- **Post-event feedback** — rating scale, **per-person relationship signal** (widened Sep 26 from a "meet again?" boolean to great/fine/not-for-me), optional free text, **mutual-consent contact exchange** *(Added Sep 26)*
 - **Deliverable:** a user can sign up, complete a profile, and submit feedback that visibly changes their next match
 
 ## Pranav — Groups, Activities & Chat
@@ -49,10 +53,13 @@ Everything from signup to a complete profile, plus the feedback loop.
 Everything after a match exists.
 
 - **First task: does Maps grounding alone cover venues, or do we need a separate Places integration?** Answer by H4 — it may delete a whole workstream.
-- **QR / room-code event join** and the edge-creation UX (`POST /api/connections`)
-- Group view — members, **the degrees path** ("you and Maya both know Chris"), Gemini's reasoning
+- **QR / room-code event join** and the edge-creation UX (`POST /api/connections`) — **CHANGED Sep 26:** a QR-formed connection must carry which event it happened at; the app won't show a scannable code without one
+- Group view — members, Gemini's reasoning. **CHANGED Sep 26:** no longer shows a degrees path to anyone you haven't met — members past 1st degree are redacted server-side (see [DATA-MODEL.md](./DATA-MODEL.md)); also gained an Invited state with accept/decline, and "mark hangout done" (starts the 24h chat/photo archive clock, forms edges with everyone in the group)
 - Activity display — venue, price, map, source link
-- **Chat** — message list, composer, Supabase Realtime subscription
+- **Chat** — message list, composer, Supabase Realtime subscription. **CHANGED Sep 26:** read-only 24h after the hangout's marked done
+- **Photos** *(Added Sep 26)* — per-group album, same 24h window as chat
+- **Host a hangout** *(Added Sep 26)* — create an event (`POST /api/events`), reuses the existing join-room screen as the host's lobby
+- **Your Circle** *(Added Sep 26)* — see §"Resolved" below; this was the PRD's "graph view, build if ahead" stretch goal, now assigned and built
 - Ticketmaster integration (secondary priority, after Maps)
 - **Deliverable:** demo beats 1–3 — join, see your group, see the plan, talk to them
 
@@ -82,7 +89,7 @@ Nobody skips these.
 
 - **H4 — the server is real.** Public URL, health check, JWT verification working. If the server isn't reachable at H4, that is the whole project's critical path slipping, not a Christian problem.
 - **H6 — contracts smoke test.** Every stub returns real shapes end-to-end.
-- **H14 — the matching gate.** `POST /api/match/run` returns a real group with a real degrees path off seeded data. If it doesn't, **cut Gemini group formation and ship top-N by vector similarity** — still demoable, and you have 22 hours left instead of discovering it at H30.
+- **H14 — the matching gate.** `POST /api/match/run` returns a real group with real degree numbers off seeded data (not, since Sep 26, a displayed path to anyone past 1st degree — see the redaction note above). If it doesn't, **cut Gemini group formation and ship top-N by vector similarity** — still demoable, and you have 22 hours left instead of discovering it at H30.
 - **H20 — live-data gate.** Fewer than ~10 real accounts with real edges → demo on seed data, drop the live-recruitment beat.
 - **H26 — hard freeze.** No exceptions. Teams lose to live-demo failure far more often than to missing features.
 
@@ -97,4 +104,4 @@ Nobody skips these.
 | Server not reachable in time | Christian | H4 checkpoint exists precisely for this |
 | Onboarding is 3+ form screens of dead air on stage | Charles | Demo uses the QR skip path; profile completed later |
 | Group formation is harder than pair matching | Sahith | Size range is a **soft** constraint — best effort, not exact |
-| "Is this social media?" (Meta brief) | All | The graph view is the answer; build it if ahead at H24 |
+| "Is this social media?" (Meta brief) | Pranav | **Resolved Sep 26:** Your Circle is built (see PRD §9) and structurally enforces 1st-degree-only visibility, not just a UI choice |

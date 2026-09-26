@@ -4,6 +4,9 @@ import type {
   ApiErrorBody,
   CreateConnectionRequest,
   CreateConnectionResponse,
+  CreateEventRequest,
+  CreateEventResponse,
+  ExchangeResponse,
   FeedbackRequest,
   FeedbackResponse,
   GraphResponse,
@@ -12,7 +15,9 @@ import type {
   MatchRunResponse,
   MeResponse,
   MessagesResponse,
+  NotificationsResponse,
   OkResponse,
+  PhotosResponse,
   SendMessageRequest,
   SendMessageResponse,
   UpdatePreferencesRequest,
@@ -128,6 +133,8 @@ export const api = {
   runMatch: () =>
     request<MatchRunResponse>('/api/match/run', { method: 'POST' }),
   getGroup: (id: string) => request<GroupResponse>(groupPath(id)),
+  respondToGroup: (id: string, accept: boolean) =>
+    request<OkResponse>(`${groupPath(id)}/respond`, json('POST', { accept })),
   generateActivity: (id: string) =>
     request<Activity>(`${groupPath(id)}/activity`, { method: 'POST' }),
   getMessages: (id: string, since?: string) =>
@@ -141,4 +148,23 @@ export const api = {
     ),
   submitFeedback: (id: string, body: FeedbackRequest) =>
     request<FeedbackResponse>(`${groupPath(id)}/feedback`, json('POST', body)),
+  // Added Sep 26: host-created events, contact exchange, photos, notifications.
+  createEvent: (body: CreateEventRequest) =>
+    request<CreateEventResponse>('/api/events', json('POST', body)),
+  completeGroup: (id: string) =>
+    request<OkResponse>(`${groupPath(id)}/complete`, { method: 'POST' }),
+  requestExchange: (id: string, peerId: string) =>
+    request<ExchangeResponse>(
+      `${groupPath(id)}/exchange-request`,
+      json('POST', { peerId }),
+    ),
+  acceptExchange: (id: string, peerId: string) =>
+    request<ExchangeResponse>(
+      `${groupPath(id)}/exchange-accept`,
+      json('POST', { peerId }),
+    ),
+  getPhotos: (id: string) => request<PhotosResponse>(`${groupPath(id)}/photos`),
+  addPhoto: (id: string, storagePath: string) =>
+    request<PhotosResponse>(`${groupPath(id)}/photos`, json('POST', { storagePath })),
+  getNotifications: () => request<NotificationsResponse>('/api/notifications'),
 };

@@ -13,27 +13,32 @@ import {
   ErrorState,
   LoadingState,
   Screen,
-} from '@/features/groups/ui';
+} from '@/components/ui';
 import { api } from '@/lib/api';
 
 export function ConnectPeerScreen() {
-  const { peerId, name } = useLocalSearchParams<{
+  const { peerId, name, eventId, eventName } = useLocalSearchParams<{
     peerId: string;
     name?: string;
+    eventId?: string;
+    eventName?: string;
   }>();
   const router = useRouter();
   const me = useMe();
   const peerName = name?.trim() || 'your new friend';
   const isSelf = Boolean(me.data && me.data.id === peerId);
+  // CHANGED Sep 26: a scanned code with no event embedded (an old/stale link) can't form a
+  // connection — the design requires every edge to carry which hangout it came from.
+  const missingEvent = !eventId;
 
   const connect = useMutation({
-    mutationFn: () => api.createConnection({ peerId, context: 'qr' }),
+    mutationFn: () => api.createConnection({ peerId, context: 'qr', eventId }),
   });
 
   // Fire once per screen: a later `me` refetch must not re-send and flip the result to "already connected".
   const fired = useRef(false);
   const { mutate } = connect;
-  const ready = Boolean(me.data) && !isSelf;
+  const ready = Boolean(me.data) && !isSelf && !missingEvent;
   useEffect(() => {
     if (ready && !fired.current) {
       fired.current = true;
@@ -46,6 +51,9 @@ export function ConnectPeerScreen() {
       <Stack.Screen options={{ title: 'Connect' }} />
       {isSelf ? (
         <ErrorState message="That’s your own code. Have a friend scan it instead." />
+      ) : null}
+      {!isSelf && missingEvent ? (
+        <ErrorState message="This code doesn't say which event you're both at — ask them to open their code fresh from an event they've joined." />
       ) : null}
       {me.isPending || connect.isPending ? (
         <LoadingState label={`Connecting with ${peerName}…`} />
@@ -61,22 +69,18 @@ export function ConnectPeerScreen() {
         <>
           <Card className="items-center gap-4 py-8">
             <View className="flex-row items-center gap-3">
-              <Avatar
-                name={me.data?.displayName ?? 'You'}
-                degree={0}
-                size="lg"
-              />
-              <Handshake size={28} color="#059669" />
-              <Avatar name={peerName} degree={1} size="lg" />
+              <Avatar name={me.data?.displayName ?? 'You'} tone="you" size="lg" />
+              <Handshake size={28} color="#5B7A6B" />
+              <Avatar name={peerName} tone="met" size="lg" />
             </View>
-            <Text className="text-center text-2xl font-bold text-neutral-900 dark:text-white">
+            <Text className="text-center font-display text-2xl text-ink">
               {connect.data.edgeCreated
                 ? `You and ${peerName} are connected`
                 : `You and ${peerName} were already connected`}
             </Text>
             <Body className="text-center">
-              Their friends are now two degrees from you. The more people you
-              meet, the better your groups get.
+              {eventName ? `Met at ${eventName}. ` : ''}They'll show up in your circle now —
+              nothing past that changes yet.
             </Body>
           </Card>
           <Button

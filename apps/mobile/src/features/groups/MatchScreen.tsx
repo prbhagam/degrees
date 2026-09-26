@@ -15,7 +15,7 @@ import Animated, {
 import { api } from '@/lib/api';
 import { useSessionStore } from '@/stores/session';
 import { queryKeys } from './queries';
-import { Body, Button, ErrorState, Muted, Screen } from './ui';
+import { Body, Button, ErrorState, Muted, Screen } from '@/components/ui';
 
 // Concentric rings for 1st/2nd/3rd degree, pulsing outward while the server searches.
 function DegreeRings({ searching }: { searching: boolean }) {
@@ -43,15 +43,15 @@ function DegreeRings({ searching }: { searching: boolean }) {
         <View
           key={size}
           style={{ width: size, height: size, borderRadius: size / 2 }}
-          className={`absolute border ${['border-amber-300', 'border-sky-300', 'border-emerald-300'][index]} dark:opacity-60`}
+          className={`absolute border ${['border-line', 'border-line', 'border-sage'][index]}`}
         />
       ))}
       <Animated.View
         style={[{ width: 240, height: 240, borderRadius: 120 }, wave]}
-        className="absolute bg-violet-400/30"
+        className="absolute bg-ember/20"
       />
-      <View className="h-14 w-14 items-center justify-center rounded-full bg-violet-600">
-        <Users size={26} color="white" />
+      <View className="h-14 w-14 items-center justify-center rounded-full bg-ink">
+        <Users size={26} color="#F7F3EC" />
       </View>
     </View>
   );
@@ -79,7 +79,7 @@ export function MatchScreen() {
       <Stack.Screen options={{ title: 'Find your group' }} />
       <DegreeRings searching={match.isPending} />
       <View className="gap-2">
-        <Text className="text-center text-2xl font-bold text-neutral-900 dark:text-white">
+        <Text className="text-center font-display text-2xl text-ink">
           {match.isPending
             ? 'Looking through your network…'
             : 'Meet your next group'}

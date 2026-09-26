@@ -1,6 +1,6 @@
--- Owner: Sahith (Data & Matching) — assertions for 0003 matching functions; run via supabase/tests/run-local.sh.
+-- Owner: Sahith (Data & Matching) — assertions for 0003/0006 matching functions; run via supabase/tests/run-local.sh.
 -- Fixture mirrors 0002's 12-person graph (same edges), plus edge cases: missing embedding (p8), missing prefs (p7),
--- missing cost (p3), missing location (p11), far away (p9), expensive (p5), and a "would not meet again" (p1 → p4).
+-- missing cost (p3), missing location (p11), far away (p9), expensive (p5), and a "not for me" relationship (p1 → p4).
 
 create function pg_temp.pid(n int) returns uuid language sql immutable
 as $$ select ('d0000000-0000-4000-8000-' || lpad(n::text, 12, '0'))::uuid $$;
@@ -51,11 +51,11 @@ insert into public.groups (id, status) values ('10000000-0000-4000-8000-00000000
 insert into public.event_feedback (id, group_id, author_id, rating) values
   ('40000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000001', pg_temp.pid(1), 5),
   ('40000000-0000-4000-8000-000000000002', '10000000-0000-4000-8000-000000000001', pg_temp.pid(6), 5);
-insert into public.feedback_peers (feedback_id, peer_id, would_meet_again) values
-  ('40000000-0000-4000-8000-000000000001', pg_temp.pid(2), true),
-  ('40000000-0000-4000-8000-000000000001', pg_temp.pid(4), false),
-  ('40000000-0000-4000-8000-000000000001', pg_temp.pid(6), true),
-  ('40000000-0000-4000-8000-000000000002', pg_temp.pid(1), true);
+insert into public.feedback_peers (feedback_id, peer_id, relationship) values
+  ('40000000-0000-4000-8000-000000000001', pg_temp.pid(2), 'great'),
+  ('40000000-0000-4000-8000-000000000001', pg_temp.pid(4), 'not_for_me'),
+  ('40000000-0000-4000-8000-000000000001', pg_temp.pid(6), 'great'),
+  ('40000000-0000-4000-8000-000000000002', pg_temp.pid(1), 'great');
 
 -- Privileges: clients can't call the RPCs; the service role can.
 do $$

@@ -1,9 +1,13 @@
 // Owner: Pranav (Groups, Activities & Chat) — room-code join; Christian owns the server framework.
 import { Hono } from 'hono';
-import type { JoinEventResponse } from '@degrees/shared';
+import {
+  createEventRequestSchema,
+  type CreateEventResponse,
+  type JoinEventResponse,
+} from '@degrees/shared';
 import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
-import { ApiError } from '../lib/errors.js';
+import { ApiError, validateJson } from '../lib/errors.js';
 import { displayNames } from '../lib/graph.js';
 import type { AppEnv } from '../middleware/auth.js';
 import { DEMO_EVENT_CODE, eventFixture } from '../mocks/fixtures.js';
@@ -13,9 +17,55 @@ const mockEventJoins = new Set<string>();
 const eventNotFound = () =>
   new ApiError(404, 'event_not_found', 'No event uses that room code.');
 
-export const eventRoutes = new Hono<AppEnv>().post(
-  '/events/:roomCode/join',
-  async (context) => {
+// 6 chars, no ambiguous 0/O/1/I — read out loud at a table full of strangers.
+const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function generateRoomCode(): string {
+  let code = '';
+  for (let i = 0; i < 6; i++) {
+    code += ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
+export const eventRoutes = new Hono<AppEnv>()
+  .post('/events', async (context) => {
+    const request = await validateJson(context, createEventRequestSchema);
+    const userId = context.get('userId');
+    const roomCode = generateRoomCode();
+
+    if (env.mockMode) {
+      const response = {
+        eventId: `mock-event-${roomCode}`,
+        roomCode,
+      } satisfies CreateEventResponse;
+      return context.json(response);
+    }
+
+    const db = getServiceClient();
+    const { data, error } = await db
+      .from('events')
+      .insert({
+        room_code: roomCode,
+        name: request.name,
+        description: request.description ?? null,
+        scheduled_at: request.scheduledAt ?? null,
+        city: request.city ?? null,
+        group_size_min: request.groupSizeMin,
+        group_size_max: request.groupSizeMax,
+        created_by: userId,
+      })
+      .select('id')
+      .single();
+    if (error || !data) {
+      throw new ApiError(500, 'save_failed', 'Failed to create the event.');
+    }
+    const response = {
+      eventId: data.id as string,
+      roomCode,
+    } satisfies CreateEventResponse;
+    return context.json(response);
+  })
+  .post('/events/:roomCode/join', async (context) => {
     // Room codes are case-insensitive for people typing them; they're stored uppercase.
     const roomCode = context.req.param('roomCode').trim().toUpperCase();
     const userId = context.get('userId');
@@ -72,5 +122,4 @@ export const eventRoutes = new Hono<AppEnv>().post(
       })),
     } satisfies JoinEventResponse;
     return context.json(response);
-  },
-);
+  });

@@ -24,7 +24,7 @@ import {
   LoadingState,
   Muted,
   Screen,
-} from '@/features/groups/ui';
+} from '@/components/ui';
 import { api } from '@/lib/api';
 import { formatPrice, formatStartsAt } from './format';
 
@@ -40,9 +40,7 @@ function Fact({ icon, children }: { icon: ReactNode; children: ReactNode }) {
   return (
     <View className="flex-row items-center gap-2">
       {icon}
-      <Text className="text-base text-neutral-800 dark:text-neutral-200">
-        {children}
-      </Text>
+      <Text className="font-body text-base text-ink">{children}</Text>
     </View>
   );
 }
@@ -62,19 +60,17 @@ function SourceAttribution({ activity }: { activity: Activity }) {
       className="flex-row items-center gap-1"
     >
       <Muted>{prefix}</Muted>
-      <Text className="text-sm font-semibold text-violet-600 underline dark:text-violet-400">
-        {label}
-      </Text>
-      <ExternalLink size={12} color="#7c3aed" />
+      <Text className="font-body-semibold text-sm text-ember-ink underline">{label}</Text>
+      <ExternalLink size={12} color="#B8501F" />
     </Pressable>
   );
 }
 
 function ActivityDetails({ activity }: { activity: Activity }) {
-  const iconColor = '#737373';
+  const iconColor = '#8A8378';
   return (
     <>
-      <View className="overflow-hidden rounded-2xl border border-neutral-200 dark:border-neutral-800">
+      <View className="overflow-hidden rounded-l border border-line">
         <MapView
           style={{ height: 220 }}
           initialRegion={{
@@ -95,12 +91,8 @@ function ActivityDetails({ activity }: { activity: Activity }) {
       </View>
 
       <View className="gap-1">
-        <Text className="text-2xl font-bold text-neutral-900 dark:text-white">
-          {activity.title}
-        </Text>
-        <Text className="text-base font-medium text-neutral-700 dark:text-neutral-300">
-          {activity.venue}
-        </Text>
+        <Text className="font-display text-2xl text-ink">{activity.title}</Text>
+        <Text className="font-body-medium text-base text-ink">{activity.venue}</Text>
         <Muted>{activity.address}</Muted>
       </View>
 
@@ -113,9 +105,9 @@ function ActivityDetails({ activity }: { activity: Activity }) {
         </Fact>
       </Card>
 
-      <Card className="border-violet-200 bg-violet-50 dark:border-violet-900 dark:bg-violet-950/40">
+      <Card className="border-line bg-paper-raised">
         <View className="flex-row items-center gap-2">
-          <Sparkles size={16} color="#7c3aed" />
+          <Sparkles size={16} color="#5B7A6B" />
           <Heading>Why this plan</Heading>
         </View>
         <Body>{activity.reasoning}</Body>
@@ -124,7 +116,7 @@ function ActivityDetails({ activity }: { activity: Activity }) {
 
       <Button
         label="Directions"
-        icon={<Navigation size={18} color="white" />}
+        icon={<Navigation size={18} color="#F7F3EC" />}
         onPress={() => void Linking.openURL(directionsUrl(activity))}
       />
       {activity.source === 'ticketmaster' && activity.sourceUrl ? (
@@ -179,7 +171,7 @@ export function ActivityScreen() {
 
       {group.data && !activity && !generate.isPending ? (
         <Card className="items-center py-8">
-          <Sparkles size={28} color="#7c3aed" />
+          <Sparkles size={28} color="#5B7A6B" />
           <Body className="text-center">
             No plan yet. Degrees will pick one real place near everyone that
             fits the group’s budget.
@@ -194,7 +186,7 @@ export function ActivityScreen() {
           <Button
             label="Suggest something else"
             variant="ghost"
-            icon={<RefreshCw size={16} color="#7c3aed" />}
+            icon={<RefreshCw size={16} color="#20201C" />}
             onPress={() => generate.mutate()}
           />
         </>

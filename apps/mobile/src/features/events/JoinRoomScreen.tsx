@@ -3,10 +3,11 @@ import type { CreateConnectionResponse } from '@degrees/shared';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { Check, QrCode, Users } from 'lucide-react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { useMe } from '@/features/groups/queries';
+import { useSessionStore } from '@/stores/session';
 import {
   Avatar,
   Body,
@@ -17,7 +18,7 @@ import {
   LoadingState,
   Muted,
   Screen,
-} from '@/features/groups/ui';
+} from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
 import { joinLink } from './links';
 
@@ -37,14 +38,12 @@ function AttendeeRow({
 
   return (
     <View className="flex-row items-center gap-3 py-1.5">
-      <Avatar name={attendee.displayName} degree={result ? 1 : 3} size="sm" />
-      <Text className="flex-1 text-base text-neutral-900 dark:text-white">
-        {attendee.displayName}
-      </Text>
+      <Avatar name={attendee.displayName} tone={result ? 'met' : 'unmet'} size="sm" />
+      <Text className="flex-1 font-body text-base text-ink">{attendee.displayName}</Text>
       {result ? (
         <View className="flex-row items-center gap-1">
-          <Check size={16} color="#059669" />
-          <Text className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+          <Check size={16} color="#5B7A6B" />
+          <Text className="font-body-medium text-sm text-sage">
             {result.edgeCreated ? 'Connected' : 'Already met'}
           </Text>
         </View>
@@ -81,6 +80,13 @@ export function JoinRoomScreen() {
   const others =
     event.data?.attendees.filter(({ id }) => id !== me.data?.id) ?? [];
 
+  const setActiveEvent = useSessionStore((state) => state.setActiveEvent);
+  useEffect(() => {
+    if (event.data) {
+      setActiveEvent({ id: event.data.eventId, name: event.data.name });
+    }
+  }, [event.data, setActiveEvent]);
+
   return (
     <Screen>
       <Stack.Screen options={{ title: event.data?.name ?? 'Joining event' }} />
@@ -98,20 +104,18 @@ export function JoinRoomScreen() {
 
       {event.data ? (
         <>
-          <Card className="items-center border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/40">
-            <Check size={28} color="#059669" />
-            <Text className="text-xl font-bold text-neutral-900 dark:text-white">
-              You’re in
-            </Text>
+          <Card className="items-center border-line bg-paper-raised">
+            <Check size={28} color="#5B7A6B" />
+            <Text className="font-display text-xl text-ink">You're in</Text>
             <Body className="text-center">
-              Tap “We met” for anyone you’ve actually talked to. That’s what
+              Tap "We met" for anyone you've actually talked to. That's what
               Degrees matches from.
             </Body>
           </Card>
 
           <Card>
             <View className="flex-row items-center gap-2">
-              <Users size={16} color="#737373" />
+              <Users size={16} color="#8A8378" />
               <Heading>{`Here now · ${others.length}`}</Heading>
             </View>
             {others.length === 0 ? (
@@ -130,19 +134,17 @@ export function JoinRoomScreen() {
           <Card className="items-center">
             {showQr ? (
               <>
-                <View className="rounded-2xl bg-white p-4">
+                <View className="rounded-l bg-paper-raised p-4">
                   <QRCode value={joinLink(roomCode)} size={200} />
                 </View>
-                <Text className="text-2xl font-bold tracking-[6px] text-neutral-900 dark:text-white">
-                  {roomCode}
-                </Text>
+                <Text className="font-display text-2xl tracking-[6px] text-ink">{roomCode}</Text>
                 <Muted>Scan with the iPhone camera or in Degrees.</Muted>
               </>
             ) : null}
             <Button
               label={showQr ? 'Hide code' : 'Invite people with a QR code'}
               variant="ghost"
-              icon={<QrCode size={16} color="#7c3aed" />}
+              icon={<QrCode size={16} color="#20201C" />}
               onPress={() => setShowQr((value) => !value)}
             />
           </Card>

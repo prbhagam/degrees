@@ -81,21 +81,70 @@ export const connectionRoutes = new Hono<AppEnv>()
     } satisfies CreateConnectionResponse;
     return context.json(response);
   })
+  // CHANGED Sep 26: this only ever returns 1st-degree connections (people actually met), plus
+  // `mutualEdges` between two of the viewer's own connections who also know each other. It is not
+  // a window into the wider matching pool — that stays server-side, used only by /match/run.
   .get('/graph/me', async (context) => {
     if (env.mockMode) {
       const response: GraphResponse = graphFixture;
       return context.json(response);
     }
-    const { reach, edges } = await exploreFrom(context.get('userId'));
+    const viewerId = context.get('userId');
+    const db = getServiceClient();
+    const { reach, edges } = await exploreFrom(viewerId, 1);
+    const neighborIds = [...reach.keys()].filter((id) => id !== viewerId);
     const names = await displayNames(reach.keys());
+
+    const { data: viewerConnections, error: connError } = await db
+      .from('connections')
+      .select('user_a, user_b, event_id')
+      .or(`user_a.eq.${viewerId},user_b.eq.${viewerId}`);
+    if (connError) {
+      throw new Error(`connections read failed: ${connError.message}`);
+    }
+    const eventIdByNeighbor = new Map<string, string>();
+    for (const row of viewerConnections) {
+      const other = row.user_a === viewerId ? row.user_b : row.user_a;
+      if (row.event_id) eventIdByNeighbor.set(other as string, row.event_id as string);
+    }
+    const eventIds = [...new Set(eventIdByNeighbor.values())];
+    const eventNames = new Map<string, string>();
+    if (eventIds.length > 0) {
+      const { data: eventRows, error: eventError } = await db
+        .from('events')
+        .select('id, name')
+        .in('id', eventIds);
+      if (eventError) {
+        throw new Error(`events read failed: ${eventError.message}`);
+      }
+      for (const row of eventRows) {
+        if (row.name) eventNames.set(row.id as string, row.name as string);
+      }
+    }
+
+    let mutualRows: { user_a: string; user_b: string }[] = [];
+    if (neighborIds.length > 1) {
+      const { data, error: mutualError } = await db
+        .from('connections')
+        .select('user_a, user_b')
+        .in('user_a', neighborIds)
+        .in('user_b', neighborIds);
+      if (mutualError) {
+        throw new Error(`connections read failed: ${mutualError.message}`);
+      }
+      mutualRows = data as { user_a: string; user_b: string }[];
+    }
+
     const response = {
-      nodes: [...reach].map(([id, { degree }]) => ({
+      nodes: neighborIds.map((id) => ({
         id,
         displayName: names.get(id) ?? 'Someone',
-        degree,
+        metAt: eventNames.get(eventIdByNeighbor.get(id) ?? '') ?? null,
       })),
-      // Edges to people past the depth cap would dangle in the view, so keep only edges between known nodes.
-      edges: edges.filter(({ a, b }) => reach.has(a) && reach.has(b)),
+      edges: edges
+        .filter(({ a, b }) => reach.has(a) && reach.has(b))
+        .map(({ a, b }) => ({ a, b })),
+      mutualEdges: mutualRows.map(({ user_a, user_b }) => ({ a: user_a, b: user_b })),
     } satisfies GraphResponse;
     return context.json(response);
   });

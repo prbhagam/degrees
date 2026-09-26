@@ -8,15 +8,25 @@ export function joinLink(roomCode: string): string {
 }
 
 // The name is display-only (there's no endpoint to look a person up by id); the server trusts only the id.
-export function connectLink(userId: string, displayName: string): string {
+// CHANGED Sep 26: a connection must be tied to the event both people are at — see session.ts's
+// `activeEvent`. `eventId`/`eventName` are optional only because a caller with no active event
+// can't embed one; ConnectScreen refuses to show a code in that case instead of connecting blind.
+export function connectLink(
+  userId: string,
+  displayName: string,
+  event?: { id: string; name: string },
+): string {
   return Linking.createURL(`connect/${userId}`, {
-    queryParams: { name: displayName },
+    queryParams: {
+      name: displayName,
+      ...(event ? { eventId: event.id, eventName: event.name } : {}),
+    },
   });
 }
 
 export type ScanTarget =
   | { kind: 'join'; roomCode: string }
-  | { kind: 'connect'; peerId: string; name?: string };
+  | { kind: 'connect'; peerId: string; name?: string; eventId?: string; eventName?: string };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ROOM_CODE = /^[A-Z0-9]{3,16}$/i;
@@ -40,10 +50,15 @@ export function parseScan(data: string): ScanTarget | null {
   if (!UUID.test(value)) {
     return null;
   }
-  const name = Linking.parse(text).queryParams?.name;
+  const params = Linking.parse(text).queryParams ?? {};
+  const name = params.name;
+  const eventId = params.eventId;
+  const eventName = params.eventName;
   return {
     kind: 'connect',
     peerId: value,
     ...(typeof name === 'string' ? { name } : {}),
+    ...(typeof eventId === 'string' ? { eventId } : {}),
+    ...(typeof eventName === 'string' ? { eventName } : {}),
   };
 }

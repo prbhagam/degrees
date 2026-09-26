@@ -115,7 +115,7 @@ export async function loadGroup(
     await Promise.all([
       db
         .from('groups')
-        .select('id, status, reasoning')
+        .select('id, status, reasoning, completed_at')
         .eq('id', groupId)
         .single(),
       db.from('activities').select('*').eq('group_id', groupId).limit(1),
@@ -133,42 +133,35 @@ export async function loadGroup(
   const viewerTags = new Set(
     (tags.get(viewerId) ?? []).map((label) => label.toLowerCase()),
   );
+  // CHANGED Sep 26: members past 1st degree are redacted — no id, no displayName, no `via` chain.
+  // The design goal is that you only ever see someone's identity after you've actually met them.
   const members: GroupMember[] = rows.map(({ user_id: id, degree }) => {
     const path = reach.get(id);
-    return {
-      id,
-      displayName: names.get(id) ?? 'Someone',
-      // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
-      degree: path?.degree ?? degree ?? 0,
-      sharedInterests:
-        id === viewerId
-          ? []
-          : (tags.get(id) ?? []).filter((label) =>
-              viewerTags.has(label.toLowerCase()),
-            ),
-      ...(path
-        ? {
-            via: path.via.map((viaId) => ({
-              id: viaId,
-              displayName: names.get(viaId) ?? 'a friend',
-            })),
-          }
-        : {}),
-    };
+    // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
+    const resolvedDegree = path?.degree ?? degree ?? 0;
+    const revealed = resolvedDegree <= 1;
+    const sharedInterests =
+      id === viewerId
+        ? []
+        : (tags.get(id) ?? []).filter((label) => viewerTags.has(label.toLowerCase()));
+    return revealed
+      ? {
+          id,
+          displayName: names.get(id) ?? 'Someone',
+          degree: resolvedDegree,
+          sharedInterests,
+          revealed: true,
+        }
+      : {
+          id: null,
+          displayName: null,
+          degree: resolvedDegree,
+          sharedInterests,
+          revealed: false,
+        };
   });
-  // The via names above only cover group members; resolve anyone else on a path.
-  const outsiders = members.flatMap(({ via }) =>
-    (via ?? []).filter(({ id }) => !names.has(id)).map(({ id }) => id),
-  );
-  if (outsiders.length > 0) {
-    const more = await displayNames(outsiders);
-    for (const member of members) {
-      for (const hop of member.via ?? []) {
-        hop.displayName = more.get(hop.id) ?? hop.displayName;
-      }
-    }
-  }
   members.sort((a, b) => a.degree - b.degree);
+  const unrevealedCount = members.filter((member) => !member.revealed).length;
 
   const activityRow = activityResult.data[0] as ActivityRow | undefined;
   return {
@@ -176,7 +169,9 @@ export async function loadGroup(
     status: (groupResult.data.status as GroupStatus | null) ?? 'proposed',
     reasoning: (groupResult.data.reasoning as string | null) ?? '',
     members,
+    unrevealedCount,
     activity: activityRow ? toActivity(activityRow) : null,
+    completedAt: (groupResult.data.completed_at as string | null) ?? null,
   };
 }
 

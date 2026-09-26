@@ -8,6 +8,11 @@ import type {
   MatchRunResponse,
   MeResponse,
   MessagesResponse,
+  Notification,
+  NotificationsResponse,
+  Photo,
+  PhotosResponse,
+  UpdatePreferencesRequest,
 } from '@degrees/shared';
 
 export const REQUESTER_ID = '10000000-0000-4000-8000-000000000001';
@@ -96,24 +101,38 @@ export const meFixture = {
   username: 'avery.codes',
   displayName: 'Avery Chen',
   bio: 'CS student who likes tiny concerts and ambitious side projects.',
+  aiParagraph: '',
   city: 'Atlanta',
+  phone: '+1-404-555-0101',
+  pronouns: 'they/them',
+  photoUrl: null,
+  tags: people[0].interests.map((label) => ({ label, kind: 'hobby' as const })),
   hasCompletedProfile: true,
 } satisfies MeResponse;
 
+export const preferencesFixture = {
+  costMinCents: 0,
+  costMaxCents: 3000,
+  maxTravelMi: 10,
+  frequency: 'biweekly',
+  groupSizeMin: 3,
+  groupSizeMax: 6,
+  maxDegrees: 2,
+} satisfies UpdatePreferencesRequest;
+
+// CHANGED Sep 26: the circle view only ever shows 1st-degree connections (Jordan and Leo are
+// degree 2 in matchFixture below — proposed groupmates, not yet met — so they never appear here),
+// plus `mutualEdges` between two of the viewer's own connections who also know each other.
 export const graphFixture = {
   nodes: [
-    { id: REQUESTER_ID, displayName: 'Avery Chen', degree: 0 },
-    { id: people[1].id, displayName: 'Maya Patel', degree: 1 },
-    { id: people[2].id, displayName: 'Chris Brooks', degree: 1 },
-    { id: people[3].id, displayName: 'Jordan Kim', degree: 2 },
-    { id: people[5].id, displayName: 'Leo Garcia', degree: 2 },
+    { id: people[1].id, displayName: 'Maya Patel', metAt: 'HackGT Opening Mixer' },
+    { id: people[2].id, displayName: 'Chris Brooks', metAt: 'HackGT Opening Mixer' },
   ],
   edges: [
     { a: REQUESTER_ID, b: people[1].id },
     { a: REQUESTER_ID, b: people[2].id },
-    { a: people[1].id, b: people[3].id },
-    { a: people[2].id, b: people[5].id },
   ],
+  mutualEdges: [{ a: people[1].id, b: people[2].id }],
 } satisfies GraphResponse;
 
 export const eventFixture = {
@@ -139,6 +158,9 @@ export const activityFixture = {
     'A casual activity with food nearby gives everyone an easy way to talk.',
 } satisfies Activity;
 
+// CHANGED Sep 26 — BREAKING: Jordan and Leo are degree-2 proposed groupmates the viewer hasn't
+// met yet, so they're redacted (no id, no name) instead of carrying a `via` chain. The reasoning
+// text still describes them in the aggregate ("a mutual connection") without naming who.
 export const matchFixture = {
   groupId: DEMO_GROUP_ID,
   members: [
@@ -147,32 +169,33 @@ export const matchFixture = {
       displayName: 'Avery Chen',
       degree: 0,
       sharedInterests: ['hackathons'],
-      via: [],
+      revealed: true,
     },
     {
       id: people[1].id,
       displayName: 'Maya Patel',
       degree: 1,
       sharedInterests: ['coffee'],
-      via: [],
+      revealed: true,
     },
     {
-      id: people[3].id,
-      displayName: 'Jordan Kim',
+      id: null,
+      displayName: null,
       degree: 2,
       sharedInterests: ['Atlanta food'],
-      via: [{ id: people[1].id, displayName: people[1].displayName }],
+      revealed: false,
     },
     {
-      id: people[5].id,
-      displayName: 'Leo Garcia',
+      id: null,
+      displayName: null,
       degree: 2,
       sharedInterests: ['bouldering'],
-      via: [{ id: people[2].id, displayName: people[2].displayName }],
+      revealed: false,
     },
   ],
+  unrevealedCount: 2,
   reasoning:
-    'You already know Maya, Maya knows Jordan, and Chris connects you to Leo. The group shares hands-on activities and low-key Atlanta outings.',
+    'You already know Maya, and two more people from your wider network share hands-on activities and low-key Atlanta outings with you.',
 } satisfies MatchRunResponse;
 
 export const groupFixture = {
@@ -180,8 +203,40 @@ export const groupFixture = {
   status: 'confirmed',
   reasoning: matchFixture.reasoning,
   members: matchFixture.members,
+  unrevealedCount: matchFixture.unrevealedCount,
   activity: activityFixture,
+  completedAt: null,
 } satisfies GroupResponse;
+
+export const eventLobbyFixture = {
+  eventId: DEMO_EVENT_ID,
+  roomCode: DEMO_EVENT_CODE,
+  name: 'HackGT Opening Mixer',
+  attendees: people.slice(0, 3).map(({ id, displayName }) => ({ id, displayName })),
+};
+
+export const photosFixture = {
+  photos: [] as Photo[],
+} satisfies PhotosResponse;
+
+export const notificationsFixture = {
+  notifications: [
+    {
+      id: 'n1',
+      type: 'hangout_invited',
+      payload: { groupId: DEMO_GROUP_ID, name: 'Duckpin Bowling and Food Hall Hangout' },
+      read: false,
+      createdAt: '2026-09-26T12:00:00.000Z',
+    },
+    {
+      id: 'n2',
+      type: 'message_received',
+      payload: { groupId: DEMO_GROUP_ID, senderName: 'Maya Patel' },
+      read: false,
+      createdAt: '2026-09-26T14:05:00.000Z',
+    },
+  ] satisfies Notification[],
+} satisfies NotificationsResponse;
 
 export const messagesFixture = {
   messages: [
