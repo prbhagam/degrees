@@ -1,0 +1,26 @@
+{
+  "name": "degrees",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta --kill-others-on-fail \"npm run dev -w @degrees/server\" \"npm run dev -w @degrees/web\"",
+    "typecheck": "npm run typecheck -w @degrees/shared -w @degrees/server -w @degrees/web && tsc -p supabase/tsconfig.json --noEmit",
+    "build": "npm run build -w @degrees/web",
+    "seed": "tsx supabase/seed/seed.ts"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "packageManager": "npm@11.19.1",
+  "devDependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "concurrently": "^9.2.1",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.5",
+    "typescript": "6.0.3"
+  }
+}

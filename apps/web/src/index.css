@@ -1,0 +1,13 @@
+/* Owner: shared web scaffold (Charles) — see docs/ROLES.md. */
+@import "tailwindcss";
+
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #fafafa;
+  color: #18181b;
+}
+
+a {
+  color: #4338ca;
+}
