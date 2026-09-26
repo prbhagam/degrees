@@ -11,7 +11,12 @@ import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError, validateJson } from '../lib/errors.js';
 import { displayNames } from '../lib/graph.js';
-import { groupNotFound, loadGroup, memberRows } from '../lib/groups.js';
+import {
+  assertNotArchived,
+  groupNotFound,
+  loadGroup,
+  memberRows,
+} from '../lib/groups.js';
 import type { AppEnv } from '../middleware/auth.js';
 import {
   DEMO_GROUP_ID,
@@ -75,7 +80,9 @@ export const messageRoutes = new Hono<AppEnv>()
     // name here despite being redacted everywhere else.
     const group = await loadGroup(groupId, context.get('userId'));
     const revealedIds = new Set(
-      group.members.filter((member) => member.revealed).map((member) => member.id),
+      group.members
+        .filter((member) => member.revealed)
+        .map((member) => member.id),
     );
     let query = getServiceClient()
       .from('messages')
@@ -103,7 +110,7 @@ export const messageRoutes = new Hono<AppEnv>()
           id: String(row.id),
           senderId,
           senderName: revealedIds.has(senderId)
-            ? names.get(senderId) ?? 'Someone'
+            ? (names.get(senderId) ?? 'Someone')
             : 'Someone',
           body: row.body as string,
           createdAt: new Date(row.created_at as string).toISOString(),
@@ -142,6 +149,7 @@ export const messageRoutes = new Hono<AppEnv>()
     }
 
     await memberRows(groupId, userId);
+    await assertNotArchived(groupId);
     const { data, error } = await getServiceClient()
       .from('messages')
       .insert({ group_id: groupId, sender_id: userId, body })

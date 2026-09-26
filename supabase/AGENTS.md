@@ -43,7 +43,7 @@ To test locally without the Supabase CLI, apply the migration to a throwaway Pos
 
 ## Seeding the shared project
 
-1. Applied on the shared project: `0002`–`0005` (Sep 26). **`0006` is NOT applied yet** (checked Sep 26). Apply it in the SQL editor **in the same window as deploying PR #14's server**: the new server writes 0006's columns, and 0006 drops `feedback_peers.would_meet_again`, which the old server writes. Verified locally: the widened check constraints replace the old ones cleanly and every 0006 table's grants hold.
+1. Applied on the shared project: `0002`–`0006` (Sep 26; `0006` went live together with PR #14's server, since each breaks the other's predecessor). Verified live: 0006's columns and tables exist, and the 24 seeded feedback rows became `great`.
    Then create the **Storage bucket for group photos** (dashboard → Storage), which no migration can do; see `docs/DATA-MODEL.md`.
 2. `npm run seed` — re-embeds every profile with Gemini (`gemini-embedding-001`, 768 dims, `SEMANTIC_SIMILARITY`).
    Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY` in the root `.env`. Safe to rerun.

@@ -59,15 +59,17 @@ function baseUrl(): string {
 }
 
 async function accessToken(): Promise<string> {
-  if (__DEV__ && isSupabaseEnvironmentUnset()) {
+  if (isSupabaseEnvironmentUnset()) {
+    // No Supabase project configured at all — nothing to authenticate against, so this can only be
+    // pointed at the mock-mode server, which accepts any bearer token.
     return 'dev';
   }
+  // CHANGED Sep 26 (Charles, from #16): this used to also fall back to 'dev' whenever __DEV__ was true and
+  // the user was signed out, even with a real Supabase project configured — so a real-mode server said
+  // "access token is invalid" on every screen instead of "you're not signed in". The auth gate
+  // (features/auth/session.ts) sends signed-out users to /login.
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error || !data.session?.access_token) {
-    if (__DEV__) {
-      // Signed out in dev: the mock-mode server accepts any token, so screens work before sign-in does.
-      return 'dev';
-    }
     throw new ApiError(401, 'unauthorized', 'Sign in before calling the API.');
   }
   return data.session.access_token;

@@ -93,8 +93,8 @@ Written after PR #14 merged, from a full test pass. Local suite green: typecheck
 
 | Who | Task |
 |---|---|
-| Sahith | Apply `0006` in the Supabase SQL editor (verified locally Sep 26), then rerun the production smoke test against the new contract |
-| Christian | Deploy `main` (PR #14) to Netlify **right after** `0006` is applied — the old server breaks under 0006, the new one breaks without it |
+| ~~Sahith~~ | ~~Apply `0006`~~ **Done Sep 26** (verified live: new columns/tables exist, 24 feedback rows converted to `great`). Production smoke test against the new contract still to rerun |
+| ~~Christian~~ | ~~Deploy PR #14 right after `0006`~~ **Done Sep 26** (verified: `/respond` exists, `/graph/me` has the new shape) |
 | Christian | **Turn on Gemini billing.** Free-tier 429s/503s hit every AI call during testing |
 
 ### Wave 1 — demo blockers (before H20)
@@ -104,15 +104,15 @@ Written after PR #14 merged, from a full test pass. Local suite green: typecheck
 | ~~Sahith~~ | ~~Profile row for new users~~ **Done (auth PR):** `POST /api/auth/signup` creates the confirmed auth user and `profiles` row server-side. No trigger needed | Email confirmation was on and rate-limited, so client signups were failing outright |
 | Sahith | `formGroups`: never name degree-2+ members or their path in `reasoning` (hide their names from the prompt, reject replies that contain one, deterministic text says "plus N from your wider network") | Reasoning currently shows names the redaction hides |
 | ~~Charles~~ | ~~Username signup + login~~ **Done (auth PR),** plus an auth gate: signed-out visits go to login and come back to the scanned link | Charles: please review the changes to your auth, onboarding, and scaffold files |
-| Pranav | `ScanScreen`: pass `eventId`/`eventName` through to `connect/[peerId]` | In-app person scans always fail with "missing event" (demo beat 1) |
-| Christian | Add `memberRows()` checks to `respond`, `complete`, `exchange-request/accept`, and `photos` | Any signed-in user with a group id can confirm or complete it, which forms edges between strangers |
+| Pranav | ~~`ScanScreen`: pass `eventId`/`eventName` through to `connect/[peerId]`~~ **Done** (falls back to the scanner's own event) | In-app person scans always fail with "missing event" (demo beat 1) |
+| Pranav | ~~Add `memberRows()` checks to `respond`, `complete`, `exchange-request/accept`, and `photos`~~ **Done** (was Christian's; these routes live in Pranav's `routes/groups.ts`) | Any signed-in user with a group id can confirm or complete it, which forms edges between strangers |
 
 ### Wave 2 — finish what the demo shows
 
 | Who | Task |
 |---|---|
 | Christian | Write notifications at the trigger points the demo hits: `hangout_invited` (match/run, per member), `feedback_prompt` (complete), `exchange_requested` / `exchange_accepted`, `connection_added`. Give the notifications screen a Realtime subscription and mark-as-read |
-| Christian | Photos `POST` returns `{ photos }` as the contract says; add its request schema to `packages/shared`; enforce the 24h lock server-side for photos and chat `POST` |
+| Pranav | ~~Photos `POST` returns `{ photos }` as the contract says; add its request schema to `packages/shared`; enforce the 24h lock server-side for photos and chat `POST`~~ **Done**; `complete` also sets `status: completed` now |
 | Christian | TestFlight build with `EXPO_PUBLIC_API_URL=https://degrees-api.netlify.app` (`api.degrees.tech` DNS is optional) |
 | Charles | Feedback: let the peer see and accept an incoming exchange request, remove the "(demo: they said yes)" link, and send or drop the group-tag chips |
 | Charles | About: send accepted generated tags as `hobby`/`activity`, not `derived` (the server drops `derived`). Making "Generate tags" real needs a small server endpoint (Christian): good for the "AI throughout" brief if there's time |

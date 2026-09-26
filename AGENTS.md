@@ -92,14 +92,12 @@ No `.env` is needed to start. The server runs in **mock mode**, accepting any be
 
 ## Status
 
-**Sep 26 (after PRs #12–#14): features built, not yet all live.** Every screen is real — no placeholders remain — and every route has a real-mode implementation. Matching runs traverse → narrow → Gemini `formGroups` with a deterministic fallback; feedback saves, re-embeds, and boosts the next match. PR #14 added the validated design: bottom tabs, Your Circle (1st-degree graph), hosted events, invite accept/decline, mark-hangout-done (forms edges, starts a 24h chat/photo window), a 3-way feedback signal, contact exchange, photos, notifications, and **server-side redaction of anyone past 1st degree**.
+**Sep 26 (after PRs #12–#18): features built and live.** Every screen is real — no placeholders remain — and every route has a real-mode implementation. Matching runs traverse → narrow → Gemini `formGroups` with a deterministic fallback; feedback saves, re-embeds, and boosts the next match. PR #14 added the validated design: bottom tabs, Your Circle (1st-degree graph), hosted events, invite accept/decline, mark-hangout-done (forms edges, starts a 24h chat/photo window), a 3-way feedback signal, contact exchange, photos, notifications, and **server-side redaction of anyone past 1st degree**.
 
-**Live now (checked Sep 26):** production (`https://degrees-api.netlify.app`) runs the PR #13 server, and the shared Supabase project has migrations 0001–0005. **PR #14 is not live**: `0006` isn't applied and the server isn't redeployed — do both in the same window (see [supabase/AGENTS.md](./supabase/AGENTS.md)). Until then the app on `main` and the live server disagree on feedback and group shapes.
+**Live (checked Sep 26):** production (`https://degrees-api.netlify.app`) runs PR #14's server, and the shared Supabase project has migrations 0001–0006. Server changes need a Netlify redeploy after merge; nothing deploys by itself.
 
 **Known gaps** (owners and order: [docs/ROLES.md](./docs/ROLES.md#next-steps-sep-26)):
 - `formGroups` reasoning names people the redaction hides.
-- In-app person-QR scans drop the event id, so "connect" always fails from the scanner.
-- `respond`, `complete`, exchange, and photos routes don't check group membership.
 - No route writes notifications; photos don't upload to Storage; the About screen's "Generate tags" is canned.
 
 **Auth (Sep 26):** username signup and login work end to end: signup → onboarding → app. The app is gated: signed-out visits go to login and return to the link they opened (e.g. a scanned event QR) afterwards.
