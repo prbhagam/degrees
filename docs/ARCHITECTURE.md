@@ -50,7 +50,7 @@ Supabase Edge Functions are serverless. Matching needs to hold a candidate pool 
 
 **Request flow:** Supabase Auth issues a JWT on login. The client sends it as `Authorization: Bearer <jwt>` on every API call. **The server verifies the token on every request** and derives the user id from it — never from the request body.
 
-RLS is on for every table the client reads. A user reads their own profile and preferences; other people's bios are readable only when a shared group row exists.
+RLS is on for every table the client reads. A user reads their own profile and preferences; other people's bios are readable only when a shared group row exists. Nobody's `lat`/`lng` is client-readable (column grants); only the server reads location.
 
 ---
 

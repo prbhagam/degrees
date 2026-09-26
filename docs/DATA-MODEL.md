@@ -143,7 +143,7 @@ feedback_peers (
 
 **`vector(768)`**, not 3072 — see [ARCHITECTURE.md §4](./ARCHITECTURE.md#4-ai-call-inventory).
 
-**RLS:** on for every table the client reads. Own profile always readable; another user's `bio` readable only when a shared `group_members` row exists.
+**RLS:** on for every table the client reads. Own profile always readable; another user's `bio` readable only when a shared `group_members` row exists. `lat`/`lng` are never readable by clients (column grants, migration 0005) — only the server reads location.
 
 ---
 

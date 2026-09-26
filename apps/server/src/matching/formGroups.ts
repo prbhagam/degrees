@@ -192,7 +192,7 @@ Requester: ${options.requesterName ?? 'the requester'}
 Requester interests: ${(options.requesterInterests ?? []).join(', ') || 'unknown'}
 Target group size including the requester: ${input.sizeRange.min}-${input.sizeRange.max} (soft; best effort)
 
-Candidates are ranked best-first. matchScore (0 to about 1.2) combines profile similarity with past feedback.
+Candidates are ranked best-first. matchScore (0 to about 1.5) combines profile similarity with past feedback.
 wouldMeetAgain counts how many times the requester and this candidate said, after hanging out, that they'd meet
 again. degree 1 = the requester already knows them; degree 2+ = a friend of a friend. connectionPath lists the
 people linking the requester to the candidate, ending with the candidate.

@@ -30,10 +30,17 @@ export const profileRoutes = new Hono<AppEnv>().put(
         throw new ApiError(500, 'update_failed', 'Failed to update profile.');
       }
 
-      await supabase.from('profile_tags').delete().eq('user_id', userId);
+      // Derived tags come from feedback and are server-owned: a profile edit replaces only the tags the user picks,
+      // otherwise saving the profile would erase what feedback taught the matcher (Sahith).
+      await supabase
+        .from('profile_tags')
+        .delete()
+        .eq('user_id', userId)
+        .neq('kind', 'derived');
 
-      if (body.tags.length > 0) {
-        const rows = body.tags.map((tag) => ({
+      const chosen = body.tags.filter((tag) => tag.kind !== 'derived');
+      if (chosen.length > 0) {
+        const rows = chosen.map((tag) => ({
           user_id: userId,
           label: tag.label,
           kind: tag.kind,
