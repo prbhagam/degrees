@@ -1,7 +1,7 @@
 // Owner: shared mobile scaffold (Charles) — the app's one UI kit. Was src/features/groups/ui.tsx;
 // moved here because every feature uses it, not just groups. CHANGED Sep 26: restyled from the
 // original violet/rounded-2xl look to the validated ember/paper/Fraunces+PublicSans design.
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -14,7 +14,7 @@ import {
   type TextInputProps,
   type TextProps,
 } from 'react-native';
-import { Lock, Minus, Plus } from 'lucide-react-native';
+import { Eye, EyeOff, Lock, Minus, Plus } from 'lucide-react-native';
 
 export function Screen({
   children,
@@ -302,7 +302,8 @@ export function Stepper({
       >
         <Minus size={16} color="#20201C" />
       </Pressable>
-      <Text className="font-body-semibold w-4 text-center text-base text-ink">{value}</Text>
+      {/* CHANGED Sep 26 (wave 2): was w-4 (16px), which squeezed two-digit values and let the row collapse. */}
+      <Text className="font-body-semibold min-w-7 text-center text-base text-ink">{value}</Text>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Increase"
@@ -349,21 +350,39 @@ export function SegmentedTabs<T extends string>({
 export function Field({
   label,
   hint,
+  secureTextEntry,
   ...props
 }: TextInputProps & { label?: string; hint?: string }) {
+  // Added Sep 26 (wave 2): password fields get a show/hide toggle.
+  const [revealed, setRevealed] = useState(false);
+  const secure = Boolean(secureTextEntry);
   return (
     <View className="gap-1.5">
       {label ? <Text className="font-body-semibold text-[13px] text-muted">{label}</Text> : null}
-      <TextInput
-        // CHANGED Sep 26: py-3.5 with no explicit line-height let the OS center the cursor/typed
-        // text against the font's natural line box, which sits higher than the placeholder text —
-        // visible as soon as you start typing. Fixed line-height + textAlignVertical keeps both
-        // aligned the same way in every state (empty, placeholder, typed, multiline).
-        className="rounded-m border border-line bg-paper-raised px-4 py-3 font-body text-base leading-5 text-ink"
-        style={{ textAlignVertical: props.multiline ? 'top' : 'center' }}
-        placeholderTextColor="#8A8378"
-        {...props}
-      />
+      <View>
+        <TextInput
+          // CHANGED Sep 26: py-3.5 with no explicit line-height let the OS center the cursor/typed
+          // text against the font's natural line box, which sits higher than the placeholder text —
+          // visible as soon as you start typing. Fixed line-height + textAlignVertical keeps both
+          // aligned the same way in every state (empty, placeholder, typed, multiline).
+          className={`rounded-m border border-line bg-paper-raised px-4 py-3 font-body text-base leading-5 text-ink ${secure ? 'pr-12' : ''}`}
+          style={{ textAlignVertical: props.multiline ? 'top' : 'center' }}
+          placeholderTextColor="#8A8378"
+          secureTextEntry={secure && !revealed}
+          {...props}
+        />
+        {secure ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={revealed ? 'Hide password' : 'Show password'}
+            onPress={() => setRevealed((value) => !value)}
+            hitSlop={8}
+            className="absolute right-3 top-0 h-full justify-center"
+          >
+            {revealed ? <EyeOff size={18} color="#8A8378" /> : <Eye size={18} color="#8A8378" />}
+          </Pressable>
+        ) : null}
+      </View>
       {hint ? <Muted>{hint}</Muted> : null}
     </View>
   );

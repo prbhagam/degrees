@@ -107,7 +107,18 @@ Written after PR #14 merged, from a full test pass. Local suite green: typecheck
 | Pranav | ~~`ScanScreen`: pass `eventId`/`eventName` through to `connect/[peerId]`~~ **Done** (falls back to the scanner's own event) | In-app person scans always fail with "missing event" (demo beat 1) |
 | Pranav | ~~Add `memberRows()` checks to `respond`, `complete`, `exchange-request/accept`, and `photos`~~ **Done** (was Christian's; these routes live in Pranav's `routes/groups.ts`) | Any signed-in user with a group id can confirm or complete it, which forms edges between strangers |
 
-### Wave 2 — finish what the demo shows
+### Wave 2 (Sahith, Sep 26 evening — branch `sahith/wave2-fixes`) — built, awaiting review + deploy
+
+Everything from the Sep 26 test-pass list: pull-to-refresh + 1-minute polling · hosted events visible (one Home list of groups + meetups, active/past) · Realtime chat fix (`realtime.setAuth`, verified) · password show/hide · US phone formatting · interests Add alignment · group-size row · "We met" hidden once met · on-device cache · no swipe-back into onboarding/login · leave group · structured server logs · groups/meetups/icebreakers model · skip onboarding with nag + match gate · real photo + avatar uploads. **To go live:** apply migration `0007`, redeploy Netlify, and add `LOG_LEVEL` (optional) to the Netlify env.
+
+| Who | Task |
+|---|---|
+| Sahith | Apply `0007` + redeploy together; smoke test hosting → join → end meetup → circle on prod |
+| Christian | Real "Generate tags" endpoint (About still canned); notification writes (unchanged) |
+| Charles | Review the onboarding/auth/profile changes (skip flow, `enterApp`, prefill, avatar upload) |
+| Pranav | Review the unified GroupScreen (meetup lobby moved here from join/[roomCode]) and HomeScreen |
+
+### Wave 2 (original) — finish what the demo shows
 
 | Who | Task |
 |---|---|

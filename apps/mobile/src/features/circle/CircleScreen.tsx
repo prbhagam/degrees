@@ -4,10 +4,11 @@
 import { Fragment, useState } from 'react';
 import { Stack } from 'expo-router';
 import Svg, { Circle, Line, Text as SvgText } from 'react-native-svg';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { Avatar, ErrorState, LoadingState, Muted, Screen } from '@/components/ui';
-import { useMe } from '@/features/groups/queries';
+import { queryKeys, useMe } from '@/features/groups/queries';
 import { api } from '@/lib/api';
+import { LIVE_POLL_MS } from '@/lib/query';
 import { useQuery } from '@tanstack/react-query';
 
 type Mode = 'list' | 'map';
@@ -21,7 +22,8 @@ export function CircleScreen() {
   const [mode, setMode] = useState<Mode>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const me = useMe();
-  const graph = useQuery({ queryKey: ['graph', 'me'], queryFn: api.getGraph });
+  // Wave 2: polls once a minute while focused (new "We met" taps land here) and pulls to refresh.
+  const graph = useQuery({ queryKey: queryKeys.graph, queryFn: api.getGraph, refetchInterval: LIVE_POLL_MS });
 
   const nodes = graph.data?.nodes ?? [];
   const size = 320;
@@ -30,7 +32,7 @@ export function CircleScreen() {
   const selected = nodes.find((node) => node.id === selectedId) ?? null;
 
   return (
-    <Screen>
+    <Screen refreshControl={<RefreshControl refreshing={graph.isRefetching} onRefresh={() => void graph.refetch()} />}>
       <Stack.Screen options={{ title: 'Your circle' }} />
 
       <View className="flex-row items-center justify-between">

@@ -1,7 +1,7 @@
 // Owner: Charles (Onboarding & Profile) — see docs/ROLES.md.
 import { Stack, useRouter } from 'expo-router';
 import { ChevronRight, QrCode } from 'lucide-react-native';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, RefreshControl, Text, View } from 'react-native';
 import {
   Avatar,
   Body,
@@ -28,18 +28,20 @@ export function ProfileScreen() {
       await getSupabaseClient().auth.signOut();
     }
     setCurrentUser(null);
+    // Collapse whatever was pushed so login is the only screen left (wave 2: no swipe-back into the app).
+    if (router.canDismiss()) router.dismissAll();
     router.replace('/login');
   }
 
   return (
-    <Screen>
+    <Screen refreshControl={<RefreshControl refreshing={me.isRefetching} onRefresh={() => void me.refetch()} />}>
       <Stack.Screen options={{ title: 'Profile' }} />
       {me.isPending ? <LoadingState label="Loading profile…" /> : null}
       {me.isError ? <ErrorState message={me.error.message} onRetry={() => void me.refetch()} /> : null}
       {me.data ? (
         <>
           <View className="flex-row items-center gap-3.5">
-            <Avatar name={me.data.displayName ?? me.data.username} size="lg" tone="you" />
+            <Avatar name={me.data.displayName ?? me.data.username} photoUrl={me.data.photoUrl} size="lg" tone="you" />
             <View>
               <Text className="font-body-semibold text-lg text-ink">
                 {me.data.displayName ?? me.data.username}

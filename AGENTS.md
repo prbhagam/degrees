@@ -94,6 +94,8 @@ No `.env` is needed to start. The server runs in **mock mode**, accepting any be
 
 **Sep 26 (after PRs #12–#18): features built and live.** Every screen is real — no placeholders remain — and every route has a real-mode implementation. Matching runs traverse → narrow → Gemini `formGroups` with a deterministic fallback; feedback saves, re-embeds, and boosts the next match. PR #14 added the validated design: bottom tabs, Your Circle (1st-degree graph), hosted events, invite accept/decline, mark-hangout-done (forms edges, starts a 24h chat/photo window), a 3-way feedback signal, contact exchange, photos, notifications, and **server-side redaction of anyone past 1st degree**.
 
+**Sep 26, wave 2 (branch `sahith/wave2-fixes`, not merged or deployed):** meetups and matched groups share one model (`groups.kind`) and one screen; Home lists both, active then past, and polls once a minute; hosting takes a date and codes expire; "End meetup" connects everyone present while matched groups connect only via per-person "We met"; leave group; Gemini icebreakers; onboarding can be skipped (Home nags, `/match/run` refuses with 409 `profile_incomplete`); real photo + avatar uploads to Supabase Storage; query cache and active meetup persist on device; password show/hide; US phone formatting; structured server logs with request ids. Needs migration `0007` applied and a Netlify redeploy together.
+
 **Live (checked Sep 26):** production (`https://degrees-api.netlify.app`) runs PR #14's server, and the shared Supabase project has migrations 0001–0006. Server changes need a Netlify redeploy after merge; nothing deploys by itself.
 
 **Known gaps** (owners and order: [docs/ROLES.md](./docs/ROLES.md#next-steps-sep-26)):

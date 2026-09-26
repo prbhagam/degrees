@@ -1,6 +1,8 @@
 // Owner: Charles (Onboarding & Profile) — see docs/ROLES.md. Username signup via the server wired by Sahith (Sep 26).
+// CHANGED Sep 26 (wave 2): phone formats as (404) 555-0148 while typing (US only for now), password has a
+// show/hide toggle (Field), and onboarding is entered with replace so it isn't left under the app.
 import { useState } from 'react';
-import { authEmailFor, signupRequestSchema } from '@degrees/shared';
+import { authEmailFor, formatUsPhone, signupRequestSchema } from '@degrees/shared';
 import { useMutation } from '@tanstack/react-query';
 import { Link, Stack, useRouter } from 'expo-router';
 import { Text, View } from 'react-native';
@@ -14,6 +16,7 @@ const PRONOUN_OPTIONS = ['She/her', 'He/him', 'They/them', 'Other'];
 export function SignupScreen() {
   const router = useRouter();
   const setCurrentUser = useSessionStore((state) => state.setCurrentUser);
+  const setOnboardingSkippedBy = useSessionStore((state) => state.setOnboardingSkippedBy);
   const [name, setName] = useState('');
   const [pronoun, setPronoun] = useState<string | null>(null);
   const [username, setUsername] = useState('');
@@ -46,7 +49,8 @@ export function SignupScreen() {
     },
     onSuccess: (me) => {
       setCurrentUser(me);
-      router.push('/onboarding/interests');
+      setOnboardingSkippedBy(null);
+      router.replace('/onboarding/interests');
     },
   });
 
@@ -86,10 +90,12 @@ export function SignupScreen() {
         />
         <Field
           label="Phone number"
-          hint="Required — used to confirm you at events."
+          hint="Required — used to confirm you at events. US numbers for now."
           value={phone}
-          onChangeText={setPhone}
+          onChangeText={(text) => setPhone(formatUsPhone(text))}
           keyboardType="phone-pad"
+          textContentType="telephoneNumber"
+          maxLength={14}
           placeholder="(404) 555-0148"
         />
         <Field
@@ -98,6 +104,7 @@ export function SignupScreen() {
           value={password}
           onChangeText={setPassword}
           secureTextEntry
+          textContentType="newPassword"
         />
       </View>
 
@@ -111,7 +118,7 @@ export function SignupScreen() {
         onPress={() => signup.mutate()}
       />
 
-      <Link href="/login" className="mt-4 text-center font-body-semibold text-ember-ink">
+      <Link href="/login" replace className="mt-4 text-center font-body-semibold text-ember-ink">
         Already have an account? Log in
       </Link>
     </Screen>

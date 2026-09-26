@@ -180,6 +180,8 @@ export interface GroupResponse {
   // for a matched group; roomCode is null once the code has expired or the meetup ended.
   kind: HangoutKind;
   name: string | null;
+  // The meetup's `events` row (what QR-formed connections carry as eventId); null for a matched group.
+  eventId: string | null;
   hostId: string | null;
   scheduledAt: string | null;
   roomCode: string | null;

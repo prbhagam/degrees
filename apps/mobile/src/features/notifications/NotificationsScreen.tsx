@@ -2,7 +2,7 @@
 import type { Notification } from '@degrees/shared';
 import { formatDistanceToNowStrict, parseISO } from 'date-fns';
 import { Stack, useRouter, type Href } from 'expo-router';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { ErrorState, LoadingState, Muted, Screen } from '@/components/ui';
 import { useNotifications } from './queries';
 
@@ -38,7 +38,11 @@ export function NotificationsScreen() {
   const notifications = useNotifications();
 
   return (
-    <Screen>
+    <Screen
+      refreshControl={
+        <RefreshControl refreshing={notifications.isRefetching} onRefresh={() => void notifications.refetch()} />
+      }
+    >
       <Stack.Screen options={{ title: 'Notifications' }} />
       {notifications.isPending ? <LoadingState label="Loading…" /> : null}
       {notifications.isError ? (

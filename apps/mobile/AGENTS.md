@@ -19,12 +19,13 @@ src/app/                 Expo Router routes. Every file is a screen; _layout.tsx
   onboarding/{interests,about,preferences}.tsx → features/onboarding (Charles)
   profile/edit.tsx                         → features/profile       (Charles)
   groups/[id]/feedback.tsx                 → features/feedback      (Charles) 3-way signal + contact exchange
-  join/index.tsx  join/[roomCode].tsx      → features/events        (Pranav) room code entry · event lobby ("We met")
+  join/index.tsx  join/[roomCode].tsx      → features/events        (Pranav) room code entry · joins, then opens groups/[id] (wave 2)
   connect/index.tsx  connect/[peerId].tsx  → features/events        (Pranav) my QR (needs an active event) · deep-link target that forms an edge
   scan.tsx                                 → features/events        (Pranav) one scanner for event + person QR codes
   create-event.tsx                         → features/events        (Pranav) host a hangout
   match.tsx                                → features/groups        (Pranav) runs matching, then opens the group
-  groups/[id]/index.tsx                    → features/groups        (Pranav) members (redacted past 1st degree), accept/decline, mark done
+  groups/[id]/index.tsx                    → features/groups        (Pranav) one screen for matched groups AND meetups (wave 2): members + "We met",
+                                                                     code/QR, icebreakers, accept/decline, end/complete, leave
   groups/[id]/activity.tsx                 → features/activity      (Pranav)
   groups/[id]/chat.tsx                     → features/chat          (Pranav) Realtime + 3s polling fallback
   groups/[id]/photos.tsx                   → features/photos        (Pranav)
@@ -32,8 +33,11 @@ src/app/                 Expo Router routes. Every file is a screen; _layout.tsx
 src/features/<feature>/  the real screens, components, and hooks for that feature
 src/lib/api.ts           typed fetch wrapper for every API endpoint; attaches the Supabase JWT
 src/lib/supabase.ts      publishable-key Supabase client (READS ONLY)
-src/lib/query.ts         TanStack Query client
-src/stores/session.ts    Zustand: currentUser, activeGroupId, activeEvent (the event a QR code is tied to)
+src/lib/query.ts         TanStack Query client — wave 2: persisted to expo-sqlite, refetch on foreground, LIVE_POLL_MS (60s) for live screens
+src/lib/storage.ts       wave 2: the on-device key/value store behind the query cache and the persisted session slice
+src/lib/upload.ts        wave 2: expo-image-picker + the ONLY direct Supabase writes (Storage: event-photos, avatars)
+src/stores/session.ts    Zustand: currentUser, activeGroupId, activeEvent (persisted), onboardingSkippedBy (persisted)
+src/features/onboarding/flow.ts  wave 2: next/skip/returnTo for the three onboarding steps
 src/components/ui.tsx    the app's one UI kit (validated design) — use it instead of new primitives
 ```
 
@@ -56,10 +60,11 @@ Deep links come free from the `degrees` scheme in `app.json`. For example, `degr
 
 ## Data rules
 
-- **Every write goes through `api.ts`**, which calls the API server. Never `insert`, `update`, `upsert` or `delete` through the Supabase client, and never import Gemini here.
+- **Every write goes through `api.ts`**, which calls the API server. Never `insert`, `update`, `upsert` or `delete` through the Supabase client, and never import Gemini here. The one exception (wave 2) is `lib/upload.ts`, which puts image bytes in Storage under RLS-style storage policies and then posts the path to the API.
 - Direct Supabase **reads** are allowed only for what [API-CONTRACTS.md](../../docs/API-CONTRACTS.md) lists: your own profile and preferences, the members of your groups, chat messages via Realtime, and your own notifications. Never select `*` from `profiles` — signed-in clients can't read `lat`, `lng`, `phone`, `pronouns`, or `photo_url` (migrations 0005/0006), so a `*` select fails.
 - **Anyone past 1st degree is redacted by the server** (`revealed: false`, null id/name/bio/photo) until the group is confirmed. Render the redacted state; never try to recover identity another way.
-- Fetch through **TanStack Query** (`useQuery` / `useMutation` wrapping `api.*`). The server is the source of truth, so no optimistic local state.
+- Fetch through **TanStack Query** (`useQuery` / `useMutation` wrapping `api.*`). The server is the source of truth, so no optimistic local state. **Wave 2:** every list screen has a `RefreshControl`; screens showing live data pass `refetchInterval: LIVE_POLL_MS` (one minute, focused only); the cache is persisted to disk (`PersistQueryClientProvider`, cleared on sign-out) so `queryKeys` in `features/groups/queries.ts` are the shared key registry — bump `persistOptions.buster` when a cached shape changes.
+- **Realtime needs the JWT on the socket.** `useMessages` calls `supabase.realtime.setAuth(session.access_token)` before subscribing (verified against the shared project: without it the channel says SUBSCRIBED and delivers nothing). Do the same for any new subscription.
 - Types and Zod schemas come from `@degrees/shared`. Use the shared schemas for form validation, and don't redeclare shapes.
 
 ## Env and the API URL
@@ -72,7 +77,8 @@ Deep links come free from the `degrees` scheme in `app.json`. For example, `degr
 
 - **Signup** calls `api.signup` (`POST /api/auth/signup`, public), then `signInWithPassword` with `authEmailFor(username)`. **Login** is `signInWithPassword` with `authEmailFor(username)`. Never call `supabase.auth.signUp`: the project requires email confirmation, which a `@degrees.demo` address can't complete.
 - **The gate** is `features/auth/session.ts`, mounted in the root layout. `useAuthSubscription` restores the saved session (the splash stays up until it has), and `AuthGate` sends any signed-out visit to `/login`, remembering where it was headed. Once per sign-in it sends an unfinished profile (`hasCompletedProfile: false`) to onboarding.
-- After login, or at the end of onboarding, call `consumePendingHref()` to go where the person was headed, e.g. a scanned `join/HACKGT` link. New screens are gated automatically; don't add per-screen auth checks.
+- After login, or at the end of onboarding, call `consumePendingHref()` to go where the person was headed, e.g. a scanned `join/HACKGT` link, and enter through `enterApp()` (wave 2), which collapses the auth/onboarding stack so a left-edge swipe can't return to login or onboarding. Onboarding steps advance with `router.replace`, never `push`.
+- **Onboarding can be skipped** (wave 2): `onboardingSkippedBy` in the session store (persisted per device) keeps the gate from forcing a skipper back; Home shows what's missing from `me.profileStatus`; `/match` redirects to the missing step with `returnTo=/match` when the server answers 409 `profile_incomplete`. Hosting and joining meetups never require a finished profile.
 - The production API is `https://degrees-api.netlify.app`. Set it as `EXPO_PUBLIC_API_URL` for release/TestFlight builds.
 - The API URL defaults in dev to **the machine running Metro, on port 8787**. That address comes from Expo's `hostUri`, so a phone on the same Wi-Fi reaches your laptop. Set `EXPO_PUBLIC_API_URL` to override it. Release builds require it, and it must be **HTTPS**, because iOS App Transport Security blocks plain HTTP.
 
@@ -110,11 +116,11 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 
 ---
 
-## Known gaps (Sep 26)
+## Known gaps (Sep 26, after wave 2)
 
 Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
-- **Photos** post a placeholder path (`demo/<ts>.jpg`); no image picker or Storage upload yet, and no bucket exists.
-- **Notifications** do a one-shot select (no Realtime, no mark-read), and nothing writes rows yet.
+- **Notifications** poll once a minute (no Realtime, no mark-read), and nothing writes rows yet.
 - **Feedback**: the "(demo: they said yes)" link only re-marks your own side, the peer has no UI to see an incoming exchange request, and the group-tag chips are never sent.
-- **About**: "Generate tags" is canned, and accepted tags go out as `derived`, which the server drops. Send them as `hobby`/`activity`.
-- **Preferences** don't prefill saved values; the reach counts are hard-coded.
+- **About**: "Generate tags" is still canned (a real endpoint is Christian's); accepted tags now go out as `hobby`.
+- **Preferences** reach counts are hard-coded (values now prefill).
+- **Chat push while backgrounded** was deliberately not built (needs APNs + a dev build); in-app delivery is Realtime with a 30s safety poll.

@@ -290,6 +290,7 @@ export const groupFixture = {
   completedAt: null,
   kind: 'matched',
   name: null,
+  eventId: null,
   hostId: null,
   scheduledAt: null,
   roomCode: null,

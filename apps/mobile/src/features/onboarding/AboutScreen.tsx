@@ -1,11 +1,15 @@
 // Owner: Charles (Onboarding & Profile) — Added Sep 26 (bio, AI paragraph, avoids).
-import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+// CHANGED Sep 26 (wave 2): prefills from the saved profile, keeps the interests saved in step 1, sends accepted
+// generated tags as `hobby` (the server drops `derived` from clients), "Skip for now", and steps advance with
+// replace. "Generate tags" is still canned — a real endpoint is Christian's (docs/ROLES.md).
+import { useEffect, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Stack } from 'expo-router';
 import { Text, View } from 'react-native';
 import { Body, Button, Card, Chip, ErrorState, Field, Muted, Screen } from '@/components/ui';
 import { api } from '@/lib/api';
-import { useMe } from '@/features/groups/queries';
+import { queryKeys, useMe } from '@/features/groups/queries';
+import { useOnboardingFlow } from './flow';
 
 const AVOID_OPTIONS = [
   'Alcohol', 'Late nights', 'Large crowds', 'High-intensity activity', 'Loud venues', 'Smoking',
@@ -15,10 +19,9 @@ const AVOID_OPTIONS = [
 const GENERATED_TAGS = ['Skateboarding', 'Cooking', 'Road Trips', 'Vintage Finds'];
 
 export function AboutScreen() {
-  const router = useRouter();
-  const { tags: tagsParam } = useLocalSearchParams<{ tags?: string }>();
-  const interestTags = (tagsParam ?? '').split('|').filter(Boolean);
+  const flow = useOnboardingFlow('about');
   const me = useMe();
+  const queryClient = useQueryClient();
 
   const [bio, setBio] = useState('');
   const [city, setCity] = useState('');
@@ -26,24 +29,45 @@ export function AboutScreen() {
   const [generated, setGenerated] = useState<string[] | null>(null);
   const [acceptedGenerated, setAcceptedGenerated] = useState<string[]>([]);
   const [avoids, setAvoids] = useState<string[]>([]);
+  const [seeded, setSeeded] = useState(false);
+
+  useEffect(() => {
+    if (seeded || !me.data) return;
+    setBio(me.data.bio ?? '');
+    setCity(me.data.city ?? '');
+    setYap(me.data.aiParagraph ?? '');
+    setAvoids(me.data.tags.filter((tag) => tag.kind === 'avoid').map((tag) => tag.label));
+    setSeeded(true);
+  }, [me.data, seeded]);
 
   const save = useMutation({
-    mutationFn: () =>
-      api.updateProfile({
-        displayName: me.data?.displayName ?? '',
+    mutationFn: () => {
+      const current = me.data!;
+      const interests = current.tags
+        .filter((tag) => tag.kind === 'hobby' || tag.kind === 'activity')
+        .map((tag) => tag.label);
+      const labels = new Set(interests.map((label) => label.toLowerCase()));
+      return api.updateProfile({
+        displayName: current.displayName ?? '',
         bio,
         aiParagraph: yap,
-        city,
-        phone: me.data?.phone ?? '',
-        pronouns: me.data?.pronouns ?? undefined,
-        photoUrl: me.data?.photoUrl ?? undefined,
+        city: city.trim(),
+        phone: current.phone ?? '',
+        pronouns: current.pronouns ?? undefined,
+        photoUrl: current.photoUrl ?? undefined,
         tags: [
-          ...interestTags.map((label) => ({ label, kind: 'hobby' as const })),
-          ...acceptedGenerated.map((label) => ({ label, kind: 'derived' as const })),
+          ...interests.map((label) => ({ label, kind: 'hobby' as const })),
+          ...acceptedGenerated
+            .filter((label) => !labels.has(label.toLowerCase()))
+            .map((label) => ({ label, kind: 'hobby' as const })),
           ...avoids.map((label) => ({ label, kind: 'avoid' as const })),
         ],
-      }),
-    onSuccess: () => router.push('/onboarding/preferences'),
+      });
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.me });
+      flow.next();
+    },
   });
 
   return (
@@ -137,9 +161,10 @@ export function AboutScreen() {
         label="Next"
         className="mt-6"
         loading={save.isPending}
-        disabled={!city.trim()}
+        disabled={!city.trim() || !me.data}
         onPress={() => save.mutate()}
       />
+      <Button label="Skip for now" variant="ghost" onPress={flow.skip} />
     </Screen>
   );
 }

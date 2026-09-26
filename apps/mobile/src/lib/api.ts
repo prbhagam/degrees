@@ -11,6 +11,8 @@ import type {
   FeedbackResponse,
   GraphResponse,
   GroupResponse,
+  HangoutsResponse,
+  IcebreakersResponse,
   JoinEventResponse,
   MatchRunResponse,
   MeResponse,
@@ -181,4 +183,10 @@ export const api = {
   addPhoto: (id: string, storagePath: string) =>
     request<PhotosResponse>(`${groupPath(id)}/photos`, json('POST', { storagePath })),
   getNotifications: () => request<NotificationsResponse>('/api/notifications'),
+  // Added Sep 26 (wave 2): one list of groups + meetups, leave, icebreakers.
+  getHangouts: () => request<HangoutsResponse>('/api/hangouts'),
+  leaveGroup: (id: string) =>
+    request<OkResponse>(`${groupPath(id)}/leave`, { method: 'POST' }),
+  generateIcebreakers: (id: string) =>
+    request<IcebreakersResponse>(`${groupPath(id)}/icebreakers`, { method: 'POST' }),
 };

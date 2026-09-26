@@ -1,11 +1,13 @@
 // Owner: Charles (Onboarding & Profile) — see docs/ROLES.md. Username login + post-login routing wired by Sahith (Sep 26).
+// CHANGED Sep 26 (wave 2): password show/hide (Field); entering the app collapses the auth stack (enterApp) so a
+// swipe from the left edge can't return here; a device that skipped onboarding goes straight in.
 import { useState } from 'react';
 import { authEmailFor } from '@degrees/shared';
 import { useMutation } from '@tanstack/react-query';
 import { Link, Stack, useRouter } from 'expo-router';
 import { Text, View } from 'react-native';
-import { Body, Button, ErrorState, Field, Screen, Title } from '@/components/ui';
-import { consumePendingHref } from '@/features/auth/session';
+import { Body, Button, ErrorState, Field, Screen } from '@/components/ui';
+import { consumePendingHref, enterApp, hasSkippedOnboarding } from '@/features/auth/session';
 import { api } from '@/lib/api';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from '@/lib/supabase';
 import { useSessionStore } from '@/stores/session';
@@ -35,9 +37,13 @@ export function LoginScreen() {
     },
     onSuccess: (me) => {
       setCurrentUser(me);
-      // Unfinished profiles resume onboarding; everyone else goes where they were headed (e.g. a scanned
-      // event link), else home.
-      router.replace(me.hasCompletedProfile ? consumePendingHref() : '/onboarding/interests');
+      // Unfinished profiles resume onboarding (unless this device already chose to skip); everyone else goes
+      // where they were headed (e.g. a scanned event link), else home.
+      if (me.hasCompletedProfile || hasSkippedOnboarding(me.id)) {
+        enterApp(router, consumePendingHref());
+      } else {
+        router.replace('/onboarding/interests');
+      }
     },
   });
 
@@ -57,6 +63,7 @@ export function LoginScreen() {
             onChangeText={setUsername}
             autoCapitalize="none"
             autoCorrect={false}
+            textContentType="username"
             placeholder="maya.chen"
           />
           <Field
@@ -64,6 +71,7 @@ export function LoginScreen() {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
+            textContentType="password"
             placeholder="••••••••"
           />
         </View>

@@ -12,6 +12,7 @@ import {
 } from 'expo-router';
 import { api } from '@/lib/api';
 import { queryClient } from '@/lib/query';
+import { clearDeviceCaches } from '@/lib/storage';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from '@/lib/supabase';
 import { useSessionStore } from '@/stores/session';
 
@@ -22,6 +23,19 @@ export function consumePendingHref(): Href {
   const { pendingHref, setPendingHref } = useSessionStore.getState();
   setPendingHref(null);
   return pendingHref ?? '/';
+}
+
+// Added Sep 26 (wave 2): entering the app proper from login/signup/onboarding. Those screens are pushed on top of
+// each other, so a plain replace left login → signup → interests → about underneath Home and a swipe from the
+// left edge walked straight back into them. Collapse the stack first, then replace.
+export function enterApp(router: ReturnType<typeof useRouter>, href: Href): void {
+  if (router.canDismiss()) router.dismissAll();
+  router.replace(href);
+}
+
+// Onboarding was skipped on this device for the signed-in account (Home nags instead; matching is refused).
+export function hasSkippedOnboarding(userId: string | null | undefined): boolean {
+  return Boolean(userId) && useSessionStore.getState().onboardingSkippedBy === userId;
 }
 
 // Restores the saved session on launch and tracks sign-in/out. Mock-mode dev (no Supabase env) counts as
@@ -48,9 +62,11 @@ export function useAuthSubscription(): void {
     const { data } = supabase.auth.onAuthStateChange((event, session) => {
       setAuthStatus(session ? 'signedIn' : 'signedOut');
       if (event === 'SIGNED_OUT') {
-        // Nothing cached from the last account may leak into the next one.
+        // Nothing cached from the last account may leak into the next one — in memory or on disk.
         queryClient.clear();
+        void clearDeviceCaches();
         setCurrentUser(null);
+        useSessionStore.getState().setActiveEvent(null);
       } else if (event === 'SIGNED_IN') {
         void queryClient.invalidateQueries();
       }
@@ -99,7 +115,10 @@ export function AuthGate(): null {
       .getMe()
       .then((me) => {
         setCurrentUser(me);
-        if (!me.hasCompletedProfile) router.replace('/onboarding/interests');
+        // A skipper stays in the app (Home shows what's missing); everyone else resumes onboarding.
+        if (!me.hasCompletedProfile && !hasSkippedOnboarding(me.id)) {
+          router.replace('/onboarding/interests');
+        }
       })
       .catch((error: unknown) => {
         console.warn('[auth] could not load the profile after sign-in:', error);

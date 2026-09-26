@@ -18,6 +18,8 @@ import { getSupabaseClient } from '@/lib/supabase';
 
 // Without Realtime (mock mode, signed out, or a dropped socket) the list polls instead.
 const POLL_MS = 3_000;
+// With Realtime live, a slow safety-net poll still runs: a socket can go quiet without ever reporting an error.
+const LIVE_SAFETY_POLL_MS = 30_000;
 
 interface MessageRow {
   id: number | string;
@@ -60,7 +62,7 @@ export function useMessages(groupId: string) {
   const messages = useQuery({
     queryKey: queryKeys.messages(groupId),
     queryFn: () => api.getMessages(groupId),
-    refetchInterval: live ? false : POLL_MS,
+    refetchInterval: live ? LIVE_SAFETY_POLL_MS : POLL_MS,
   });
 
   // Realtime rows carry sender_id only; names come from the group roster. A ref keeps roster refetches from
@@ -74,11 +76,17 @@ export function useMessages(groupId: string) {
     let cancelled = false;
     let cleanup: (() => void) | undefined;
 
-    void currentSession().then((session) => {
+    void currentSession().then(async (session) => {
       if (cancelled || !session) {
         return;
       }
       const supabase = getSupabaseClient();
+      // CHANGED Sep 26 (wave 2): the socket must carry the user's JWT before the channel subscribes. Without
+      // this, a subscription opened before supabase-js finished propagating the restored session ran as
+      // `anon`, RLS on `messages` matched nothing, and the channel sat "SUBSCRIBED" delivering no rows — the
+      // "Realtime never updated" symptom from testing. Setting it explicitly removes the race.
+      await supabase.realtime.setAuth(session.access_token);
+      if (cancelled) return;
       const nameOf = (senderId: string) =>
         members.current?.find(({ id }) => id === senderId)?.displayName ??
         'Someone';
@@ -104,15 +112,19 @@ export function useMessages(groupId: string) {
             ]);
           },
         )
-        .subscribe((status) => {
+        .subscribe((status, error) => {
           const connected = status === 'SUBSCRIBED';
           setLive(connected);
+          if (__DEV__) {
+            console.log(`[chat] realtime ${status}${error ? `: ${error.message}` : ''}`);
+          }
           if (connected) {
             // Catch anything sent between the initial fetch and the subscription going live.
             void queryClient.invalidateQueries({
               queryKey: queryKeys.messages(groupId),
             });
           }
+          // CHANNEL_ERROR / TIMED_OUT / CLOSED all fall back to the 3s poll via `live` = false above.
         });
       cleanup = () => {
         setLive(false);

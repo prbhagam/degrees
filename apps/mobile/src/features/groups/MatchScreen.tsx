@@ -1,4 +1,6 @@
 // Owner: Pranav (Groups, Activities & Chat) — runs matching and hands off to the group view.
+// CHANGED Sep 26 (wave 2): matching is gated on onboarding. A 409 profile_incomplete from the server sends the
+// person to the missing step with returnTo=/match, so they land straight back here afterwards.
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Stack, useRouter } from 'expo-router';
 import { Users } from 'lucide-react-native';
@@ -12,9 +14,10 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { api } from '@/lib/api';
+import { missingStepHref } from '@/features/home/HomeScreen';
+import { api, ApiError } from '@/lib/api';
 import { useSessionStore } from '@/stores/session';
-import { queryKeys } from './queries';
+import { queryKeys, useMe } from './queries';
 import { Body, Button, ErrorState, Muted, Screen } from '@/components/ui';
 
 // Concentric rings for 1st/2nd/3rd degree, pulsing outward while the server searches.
@@ -60,19 +63,32 @@ function DegreeRings({ searching }: { searching: boolean }) {
 export function MatchScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const me = useMe();
   const setActiveGroupId = useSessionStore((state) => state.setActiveGroupId);
+
+  const sendToMissingStep = async () => {
+    const fresh = await queryClient.fetchQuery({ queryKey: queryKeys.me, queryFn: api.getMe });
+    router.replace(missingStepHref(fresh.profileStatus, '/match'));
+  };
 
   const match = useMutation({
     mutationFn: api.runMatch,
     onSuccess: (result) => {
       setActiveGroupId(result.groupId);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.myGroups });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.hangouts });
       void queryClient.invalidateQueries({
         queryKey: queryKeys.group(result.groupId),
       });
       router.replace(`/groups/${result.groupId}`);
     },
+    onError: (error) => {
+      if (error instanceof ApiError && error.code === 'profile_incomplete') {
+        void sendToMissingStep();
+      }
+    },
   });
+
+  const incomplete = me.data ? !me.data.hasCompletedProfile : false;
 
   return (
     <Screen>
@@ -92,11 +108,19 @@ export function MatchScreen() {
           How far it reaches is up to your degrees setting.
         </Muted>
       </View>
-      {match.isError ? <ErrorState message={match.error.message} /> : null}
+      {incomplete ? (
+        <ErrorState
+          message="Matching needs your interests, home base, and preferences first — it's what the matcher works from."
+          onRetry={() => void sendToMissingStep()}
+        />
+      ) : null}
+      {match.isError && !(match.error instanceof ApiError && match.error.code === 'profile_incomplete') ? (
+        <ErrorState message={match.error.message} />
+      ) : null}
       <Button
-        label={match.isPending ? 'Matching…' : 'Find my group'}
+        label={match.isPending ? 'Matching…' : incomplete ? 'Finish setup to match' : 'Find my group'}
         loading={match.isPending}
-        onPress={() => match.mutate()}
+        onPress={() => (incomplete ? void sendToMissingStep() : match.mutate())}
       />
     </Screen>
   );

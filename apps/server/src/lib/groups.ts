@@ -330,6 +330,7 @@ export async function loadGroup(
     completedAt: iso(groupResult.data.completed_at as string | null),
     kind,
     name: (groupResult.data.name as string | null) ?? meetup?.name ?? null,
+    eventId: meetup?.id ?? null,
     hostId: (groupResult.data.created_by as string | null) ?? meetup?.created_by ?? null,
     scheduledAt: iso((groupResult.data.scheduled_at as string | null) ?? meetup?.scheduled_at),
     roomCode: meetup && codeOpen ? meetup.room_code : null,
