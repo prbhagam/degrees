@@ -10,7 +10,7 @@ import {
   useSegments,
   type Href,
 } from 'expo-router';
-import { api } from '@/lib/api';
+import { api, setUnauthorizedHandler } from '@/lib/api';
 import { queryClient } from '@/lib/query';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from '@/lib/supabase';
 import { useSessionStore } from '@/stores/session';
@@ -54,6 +54,15 @@ export function useAuthSubscription(): void {
       } else if (event === 'SIGNED_IN') {
         void queryClient.invalidateQueries();
       }
+    });
+    // CHANGED Sep 26 — a 401 (server rejects the token: deleted user, expired, malformed) used to
+    // just fail whichever screen made the call, with the stale local session left in place — every
+    // other screen's own query then failed the exact same way, forever, since getSession() only
+    // ever reads the locally persisted session and never asks the server whether it's still good.
+    // Signing out here is what actually invalidates it locally; onAuthStateChange above then does
+    // the cleanup and the effect below sends the user to /login.
+    setUnauthorizedHandler(() => {
+      void supabase.auth.signOut();
     });
     return () => {
       active = false;

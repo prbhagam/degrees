@@ -38,6 +38,16 @@ export class ApiError extends Error {
   }
 }
 
+// CHANGED Sep 26 — the server rejecting a token (deleted user, expired, malformed — always a 401)
+// used to just surface as an error card on whichever screen made the call, with the stale local
+// session left in place: every other screen's own query then failed the exact same way, forever,
+// since nothing ever cleared it. features/auth/session.ts registers a handler here that signs out
+// locally, which the existing auth-state listener turns into a redirect to /login.
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(handler: () => void): void {
+  onUnauthorized = handler;
+}
+
 const DEV_API_PORT = 8787;
 
 function baseUrl(): string {
@@ -99,6 +109,9 @@ async function request<T>(
   const response = await fetch(`${baseUrl()}${path}`, { ...init, headers });
   const body = parseJson(await response.text());
   if (!response.ok) {
+    if (response.status === 401) {
+      onUnauthorized?.();
+    }
     const apiError = body as Partial<ApiErrorBody> | undefined;
     throw new ApiError(
       response.status,

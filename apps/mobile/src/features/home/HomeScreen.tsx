@@ -63,7 +63,7 @@ export function HomeScreen() {
       <Stack.Screen
         options={{
           headerRight: () => (
-            <View className="flex-row items-center gap-4">
+            <View className="flex-row items-center gap-4 pr-4">
               <Pressable accessibilityLabel="Notifications" onPress={() => router.push('/notifications')}>
                 <Bell size={20} color={ink} />
               </Pressable>
