@@ -17,8 +17,12 @@
 
 - No `userId` field in any request. The server derives it from the JWT.
 - Money fields are `z.number().int()`, in cents. Timestamps are ISO 8601 strings.
-- UUID ids are `z.uuid()`. Enum values match the Postgres check constraints in [`supabase/migrations`](../../supabase/migrations/0001_init.sql).
+- UUID ids are `z.uuid()`. Enum values match the Postgres check constraints in [`supabase/migrations`](../../supabase/migrations/) — 0001, widened in 0006 (tag kind `avoid`, frequency `few_times_week`/`biweekly`, feedback `relationship`).
 
 ## Open contract gaps
 
-Search for `CONTRACT GAP` in `src/types.ts`. Each marks an assumption the contract doc left open (group members shape, message id type, nullable profile fields, `formGroups` prefs). Resolve them at H0 and delete the comment.
+Search for `CONTRACT GAP` in `src/types.ts`. Three remain (Sep 26): nullable profile fields in `GET /me`, the message id type (bigserial sent as a string), and the `formGroups` candidate prefs shape. The group-members gap was resolved by PR #14's `revealed` shape. Also missing: a request schema for `POST /groups/:id/photos`, whose real response (`{ ok }`) doesn't match the `PhotosResponse` type.
+
+## Sep 26 contract update (PR #14)
+
+Breaking: `GroupMember` lost `via` and gained `bio`, `photoUrl`, and `revealed` (id and name are null past 1st degree); feedback `peers[].wouldMeetAgain` became `relationship: 'great' | 'fine' | 'not_for_me'`; `GET /graph/me` returns only 1st-degree nodes plus `mutualEdges`. Added: `respond`, `complete`, contact exchange, photos, host events, notifications (mock-only route). [API-CONTRACTS.md](../../docs/API-CONTRACTS.md) marks each with "CHANGED/Added Sep 26".

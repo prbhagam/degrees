@@ -2,7 +2,7 @@
 
 The Degrees iOS app: **Expo SDK 57 · React Native 0.86 · Expo Router · NativeWind v4**. Nothing is written in Swift. Read the root [AGENTS.md](../../AGENTS.md) first for the product rules. This file covers what's specific to the app.
 
-**Owners:** Charles (auth, onboarding, profile, feedback) · Pranav (events, groups, activity, chat). The shared scaffold (`src/lib`, `src/stores`, `src/components`, `src/app/_layout.tsx`, `src/app/index.tsx`) is Charles's. Changes to `src/lib/api.ts` follow the contract, and Christian merges those.
+**Owners:** Charles (auth, onboarding, profile, feedback) · Pranav (home, events, groups, activity, chat, photos, Circle) · Christian (notifications screen). The shared scaffold (`src/lib`, `src/stores`, `src/components`, `src/app/_layout.tsx`, `src/app/(tabs)/_layout.tsx`) is Charles's. Changes to `src/lib/api.ts` follow the contract, and Christian merges those.
 
 ---
 
@@ -11,24 +11,30 @@ The Degrees iOS app: **Expo SDK 57 · React Native 0.86 · Expo Router · Native
 ```
 src/app/                 Expo Router routes. Every file is a screen; _layout.tsx files are navigators.
   _layout.tsx            providers (TanStack Query) + root Stack. Rarely changes.
-  index.tsx              home hub → features/home (Pranav): your groups, find a group, meet someone, join an event
-  login.tsx signup.tsx                     → features/auth        (Charles)
-  onboarding/{interests,preferences}.tsx   → features/onboarding  (Charles)
-  profile.tsx                              → features/profile     (Charles)
-  groups/[id]/feedback.tsx                 → features/feedback    (Charles)
-  join/index.tsx  join/[roomCode].tsx      → features/events      (Pranav)
-  connect/index.tsx  connect/[peerId].tsx  → features/events      (Pranav) my QR · deep-link target that forms an edge
-  scan.tsx                                 → features/events      (Pranav) one scanner for event + person QR codes
-  match.tsx                                → features/groups      (Pranav) runs matching, then opens the group
-  groups/[id]/index.tsx                    → features/groups      (Pranav)
-  groups/[id]/activity.tsx                 → features/activity    (Pranav)
-  groups/[id]/chat.tsx                     → features/chat        (Pranav)
+  (tabs)/_layout.tsx     the bottom nav (Home · Circle · Profile) from the validated design     (Charles)
+  (tabs)/index.tsx                         → features/home          (Pranav) your groups, find a group, meet someone, host/join
+  (tabs)/circle.tsx                        → features/circle        (Pranav) Your Circle: 1st-degree list + map
+  (tabs)/profile.tsx                       → features/profile       (Charles)
+  login.tsx signup.tsx                     → features/auth          (Charles)
+  onboarding/{interests,about,preferences}.tsx → features/onboarding (Charles)
+  profile/edit.tsx                         → features/profile       (Charles)
+  groups/[id]/feedback.tsx                 → features/feedback      (Charles) 3-way signal + contact exchange
+  join/index.tsx  join/[roomCode].tsx      → features/events        (Pranav) room code entry · event lobby ("We met")
+  connect/index.tsx  connect/[peerId].tsx  → features/events        (Pranav) my QR (needs an active event) · deep-link target that forms an edge
+  scan.tsx                                 → features/events        (Pranav) one scanner for event + person QR codes
+  create-event.tsx                         → features/events        (Pranav) host a hangout
+  match.tsx                                → features/groups        (Pranav) runs matching, then opens the group
+  groups/[id]/index.tsx                    → features/groups        (Pranav) members (redacted past 1st degree), accept/decline, mark done
+  groups/[id]/activity.tsx                 → features/activity      (Pranav)
+  groups/[id]/chat.tsx                     → features/chat          (Pranav) Realtime + 3s polling fallback
+  groups/[id]/photos.tsx                   → features/photos        (Pranav)
+  notifications.tsx                        → features/notifications (Christian)
 src/features/<feature>/  the real screens, components, and hooks for that feature
 src/lib/api.ts           typed fetch wrapper for every API endpoint; attaches the Supabase JWT
 src/lib/supabase.ts      publishable-key Supabase client (READS ONLY)
 src/lib/query.ts         TanStack Query client
-src/stores/session.ts    Zustand: currentUser, activeGroupId
-src/components/          shared components; ui/ is reserved for react-native-reusables (not initialised)
+src/stores/session.ts    Zustand: currentUser, activeGroupId, activeEvent (the event a QR code is tied to)
+src/components/ui.tsx    the app's one UI kit (validated design) — use it instead of new primitives
 ```
 
 ## The routing pattern (why nobody collides)
@@ -44,14 +50,15 @@ To add a screen:
 1. Build it in your own `src/features/<feature>/`.
 2. Add a re-export file under `src/app/` at the URL you want.
 
-You never edit another feature's files, and you never edit `_layout.tsx` just to register a route. Keep all non-route code out of `src/app/`.
+You never edit another feature's files, and you never edit `_layout.tsx` just to register a route. The one exception is a new **tab**, which has to be added to `(tabs)/_layout.tsx` (Charles's). Keep all non-route code out of `src/app/`.
 
 Deep links come free from the `degrees` scheme in `app.json`. For example, `degrees://join/HACKGT` opens `join/[roomCode].tsx`. **In Expo Go the scheme is `exp://<ip>:8081/--/join/HACKGT` instead**, so build QR links with `Linking.createURL()` (see `features/events/links.ts`), never a hard-coded `degrees://`. The in-app scanner accepts both forms.
 
 ## Data rules
 
 - **Every write goes through `api.ts`**, which calls the API server. Never `insert`, `update`, `upsert` or `delete` through the Supabase client, and never import Gemini here.
-- Direct Supabase **reads** are allowed only for what [API-CONTRACTS.md](../../docs/API-CONTRACTS.md) lists: your own profile and preferences, the members of your groups, and chat messages via Realtime.
+- Direct Supabase **reads** are allowed only for what [API-CONTRACTS.md](../../docs/API-CONTRACTS.md) lists: your own profile and preferences, the members of your groups, chat messages via Realtime, and your own notifications. Never select `*` from `profiles` — signed-in clients can't read `lat`, `lng`, `phone`, `pronouns`, or `photo_url` (migrations 0005/0006), so a `*` select fails.
+- **Anyone past 1st degree is redacted by the server** (`revealed: false`, null id/name/bio/photo) until the group is confirmed. Render the redacted state; never try to recover identity another way.
 - Fetch through **TanStack Query** (`useQuery` / `useMutation` wrapping `api.*`). The server is the source of truth, so no optimistic local state.
 - Types and Zod schemas come from `@degrees/shared`. Use the shared schemas for form validation, and don't redeclare shapes.
 
@@ -59,7 +66,8 @@ Deep links come free from the `degrees` scheme in `app.json`. For example, `degr
 
 - Env lives in **`apps/mobile/.env`**, not the repo root, because Expo reads `.env` from the app folder. Copy `.env.example`.
 - `EXPO_PUBLIC_*` values are **baked into the app bundle and public**. Only the Supabase URL and publishable (anon) key go here, never the service role key.
-- With no Supabase env in dev, `api.ts` sends `Bearer dev` and the mock-mode server accepts it. That's how screens work before auth exists.
+- With no Supabase env in dev, `api.ts` sends `Bearer dev` and the mock-mode server accepts it, so every screen works against fixtures without signing in.
+- The production API is `https://degrees-api.netlify.app`. Set it as `EXPO_PUBLIC_API_URL` for release/TestFlight builds.
 - The API URL defaults in dev to **the machine running Metro, on port 8787**. That address comes from Expo's `hostUri`, so a phone on the same Wi-Fi reaches your laptop. Set `EXPO_PUBLIC_API_URL` to override it. Release builds require it, and it must be **HTTPS**, because iOS App Transport Security blocks plain HTTP.
 
 ## Styling
@@ -93,3 +101,16 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios` locally with Xcode, or `npx eas-cli@latest build --profile development` in the cloud.
 - Prefer Expo modules (`expo-camera`, `expo-sqlite`, …) over third-party libraries.
 - Docs: Expo Router https://docs.expo.dev/router/introduction.md · EAS https://docs.expo.dev/eas/index.md
+
+---
+
+## Known gaps (Sep 26)
+
+Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
+- **Signup** takes an email (no username) and never creates a `profiles` row; a real new account can't use the app yet.
+- **ScanScreen** drops `eventId`/`eventName` when routing a person QR to `connect/[peerId]`, so in-app scans always hit "missing event".
+- **Photos** post a placeholder path (`demo/<ts>.jpg`); no image picker or Storage upload yet, and no bucket exists.
+- **Notifications** do a one-shot select (no Realtime, no mark-read), and nothing writes rows yet.
+- **Feedback**: the "(demo: they said yes)" link only re-marks your own side, the peer has no UI to see an incoming exchange request, and the group-tag chips are never sent.
+- **About**: "Generate tags" is canned, and accepted tags go out as `derived`, which the server drops. Send them as `hobby`/`activity`.
+- **Preferences** don't prefill saved values; the reach counts are hard-coded.

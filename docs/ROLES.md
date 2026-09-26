@@ -59,7 +59,7 @@ Everything after a match exists.
 - **Chat** — message list, composer, Supabase Realtime subscription. **CHANGED Sep 26:** read-only 24h after the hangout's marked done
 - **Photos** *(Added Sep 26)* — per-group album, same 24h window as chat
 - **Host a hangout** *(Added Sep 26)* — create an event (`POST /api/events`), reuses the existing join-room screen as the host's lobby
-- **Your Circle** *(Added Sep 26)* — see §"Resolved" below; this was the PRD's "graph view, build if ahead" stretch goal, now assigned and built
+- **Your Circle** *(Added Sep 26)* — see PRD.md §9 "Resolved"; this was the PRD's "graph view, build if ahead" stretch goal, now assigned and built
 - Ticketmaster integration (secondary priority, after Maps)
 - **Deliverable:** demo beats 1–3 — join, see your group, see the plan, talk to them
 
@@ -68,6 +68,65 @@ Everything after a match exists.
 Pitch, polish, rehearsal, and the backup video are **all four**, not a role.
 
 ---
+
+## Next steps (Sep 26)
+
+Written after PR #14 merged, from a full test pass. Local suite green: typecheck, expo-doctor 21/21, iOS export, SQL suites, server unit tests. Mock-mode sweep of the new contract: 21/21. Production smoke (PR #13 server): 24/25.
+
+### Checkpoint status
+
+| Gate | Status |
+|---|---|
+| H4 server is real | **Met.** `https://degrees-api.netlify.app`: `/health` 200, fake token → 401 |
+| H6 contracts smoke | **Met** for the deployed server; PR #14's contract passes in mock mode, not yet live |
+| H14 matching gate | **Met.** Real groups off seed data; every seeded user gets a friend-of-a-friend |
+| H20 live-data gate | **At risk.** A real new signup can't use the app (no `profiles` row); fix in Wave 1 before recruiting |
+| H26 hard freeze | Pending |
+
+### Decisions for the team (make these first)
+
+1. **Username or email login?** The PRD and rule 9 say username + password, the seeded demo logins are `<username>@degrees.demo`, and the Sep 26 signup screen asks for an email. **Recommendation: username.** Signup and login take a username and build `<username>@degrees.demo`. It's faster to type on stage and matches the seed.
+2. **Does one member's accept confirm the group for everyone?** Right now yes, and confirming reveals every member to every other member. Recommendation: keep it for the demo and write it down. Per-member accepts are more work than the time left.
+3. **Photos and notifications: build or cut from the demo?** Recommendation: build a few notifications (they make the demo feel alive), and cut photo upload unless Pranav finishes Wave 1 early.
+
+### Wave 0 — make PR #14 live (together, one sitting)
+
+| Who | Task |
+|---|---|
+| Sahith | Apply `0006` in the Supabase SQL editor (verified locally Sep 26), then rerun the production smoke test against the new contract |
+| Christian | Deploy `main` (PR #14) to Netlify **right after** `0006` is applied — the old server breaks under 0006, the new one breaks without it |
+| Christian | **Turn on Gemini billing.** Free-tier 429s/503s hit every AI call during testing |
+
+### Wave 1 — demo blockers (before H20)
+
+| Who | Task | Why |
+|---|---|---|
+| Sahith | `0007`: trigger on `auth.users` that inserts the `profiles` row (id, username from the email's local part, display name), plus a backfill for existing auth users | Without it, `/me`, matching, and everything else fail for real new accounts |
+| Sahith | `formGroups`: never name degree-2+ members or their path in `reasoning` (hide their names from the prompt, reject replies that contain one, deterministic text says "plus N from your wider network") | Reasoning currently shows names the redaction hides |
+| Charles | Signup + login take a **username** and build `<username>@degrees.demo` (per decision 1) | Matches the seed and the 0007 trigger |
+| Pranav | `ScanScreen`: pass `eventId`/`eventName` through to `connect/[peerId]` | In-app person scans always fail with "missing event" (demo beat 1) |
+| Christian | Add `memberRows()` checks to `respond`, `complete`, `exchange-request/accept`, and `photos` | Any signed-in user with a group id can confirm or complete it, which forms edges between strangers |
+
+### Wave 2 — finish what the demo shows
+
+| Who | Task |
+|---|---|
+| Christian | Write notifications at the trigger points the demo hits: `hangout_invited` (match/run, per member), `feedback_prompt` (complete), `exchange_requested` / `exchange_accepted`, `connection_added`. Give the notifications screen a Realtime subscription and mark-as-read |
+| Christian | Photos `POST` returns `{ photos }` as the contract says; add its request schema to `packages/shared`; enforce the 24h lock server-side for photos and chat `POST` |
+| Christian | TestFlight build with `EXPO_PUBLIC_API_URL=https://degrees-api.netlify.app` (`api.degrees.tech` DNS is optional) |
+| Charles | Feedback: let the peer see and accept an incoming exchange request, remove the "(demo: they said yes)" link, and send or drop the group-tag chips |
+| Charles | About: send accepted generated tags as `hobby`/`activity`, not `derived` (the server drops `derived`). Making "Generate tags" real needs a small server endpoint (Christian): good for the "AI throughout" brief if there's time |
+| Charles | Preferences: prefill saved values |
+| Pranav | Photos: `expo-image-picker` + Supabase Storage upload + real thumbnails — or hide the entry point (decision 3). Sahith creates the bucket and policy if built |
+| Sahith | Update and commit the production smoke test (`scripts/`) so anyone can rerun the whole demo chain before rehearsals |
+
+### Wave 3 — freeze and rehearse (H24–H26 and after)
+
+| Who | Task |
+|---|---|
+| Sahith | Demo-reset script: restore seed state after each rehearsal (feedback, groups, derived tags, embeddings, test connections); delete the leftover `proposed` group from the Sep 26 match run; make the H20 call (live data vs seed) |
+| Christian | Final deploy + prod verification at the freeze |
+| All | H26 freeze, then backup video and 10 rehearsals of the demo arc |
 
 ## Timeline
 
