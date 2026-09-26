@@ -9,7 +9,7 @@ Every Gemini call in the project lives here. Nothing else, anywhere, calls a mod
 | `generateActivity.ts` | `generateActivity(input): Promise<Activity>` | Flash + **Maps grounding** | Real (Pranav): grounded venue → Places (New) for coordinates/address/price → Ticketmaster fallback → fixture, all inside a 9s budget for Netlify |
 | `analyzeFeedback.ts` | `analyzeFeedback(freeText): Promise<{ tags, sentiment }>` | Lite, then Flash | Real: Lite first (~0.75s vs Flash's 3–5s/503s on Sep 26), 3s timeout each; labels lowercased, deduped, max 5. Real mode never returns the fixture — on failure it returns no tags, since tags are written into the author's profile |
 
-Signatures are frozen in [API-CONTRACTS.md](../../../../docs/API-CONTRACTS.md), under "Internal AI services". Routes already call these functions, so filling one in changes behaviour without touching any route.
+Signatures are frozen in [API-CONTRACTS.md](../../../../docs/API-CONTRACTS.md), under "Internal AI services". All four are real (Sep 26); mock mode short-circuits each to a fixture or no-op.
 
 ## Rules
 
@@ -21,4 +21,4 @@ Signatures are frozen in [API-CONTRACTS.md](../../../../docs/API-CONTRACTS.md), 
 - Show the Maps source (linked "Google Maps") right after any grounded text in the UI. Google's terms require it; the Activity screen already does.
 - The embedding source is interest tags + AI paragraph + `derived` tags from feedback. `analyzeFeedback` output becomes `derived` `profile_tags`, and the profile is then re-embedded. That's the loop that makes matches improve.
 - Calls must **degrade, not crash** during the demo. Catch, log, and return something usable. The `formGroups` fallback (top-N by similarity) is the model for this.
-- Enable Gemini billing before H2. The free tier's rate limits won't survive a live demo.
+- **Gemini billing is still off (Sep 26) and it shows**: Flash returned 429 quota errors and 503s throughout testing, and back-to-back calls hit the per-minute cap. Everything degrades correctly (Lite retry, deterministic fallbacks, feedback saves without tags), but the AI parts of the demo — group reasoning, activity picks, derived tags — need billing on before the demo.
