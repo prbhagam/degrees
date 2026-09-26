@@ -76,7 +76,7 @@ No `.env` is needed to start. The server runs in **mock mode**, accepting any be
 6. **`connections` stores each edge once**, with `user_a < user_b`. Sort the pair before inserting or the degree math breaks.
 7. **Group size is a soft constraint.** Best effort, not a hard filter.
 8. **Money is integer cents.** Never floats.
-9. **No auth shortcuts.** Supabase username + password, no SSO. (An earlier draft proposed skipping auth entirely — that was reversed.) Auth runs on email + password under the hood: a username maps to `<username>@degrees.demo`, which is how the seeded demo logins work. **The Sep 26 signup screen asks for an email instead and never creates a `profiles` row — see Status.**
+9. **No auth shortcuts.** Supabase username + password, no SSO. (An earlier draft proposed skipping auth entirely — that was reversed.) Auth runs on email + password under the hood: a username maps to `<username>@degrees.demo` (`authEmailFor()` in `@degrees/shared`), which is how the seeded demo logins work. Signup goes through `POST /api/auth/signup`, which creates the confirmed auth user and the `profiles` row. Never call `supabase.auth.signUp` from the app: the project requires email confirmation, which `@degrees.demo` addresses can't complete.
 10. **Secrets never enter git.** `.env.example` only; real keys live in server env only. `EXPO_PUBLIC_*` values ship inside the app bundle, so only the Supabase publishable (anon) key may go there.
 
 ---
@@ -92,13 +92,14 @@ No `.env` is needed to start. The server runs in **mock mode**, accepting any be
 
 ## Status
 
-**Sep 26 (after PRs #12–#14): features built, not yet all live.** Every screen is real — no placeholders remain — and every route has a real-mode implementation. Matching runs traverse → narrow → Gemini `formGroups` with a deterministic fallback; feedback saves, re-embeds, and boosts the next match. PR #14 added the validated design: bottom tabs, Your Circle (1st-degree graph), hosted events, invite accept/decline, mark-hangout-done (forms edges, starts a 24h chat/photo window), a 3-way feedback signal, contact exchange, photos, notifications, and **server-side redaction of anyone past 1st degree**.
+**Sep 26 (after PRs #12–#18): features built and live.** Every screen is real — no placeholders remain — and every route has a real-mode implementation. Matching runs traverse → narrow → Gemini `formGroups` with a deterministic fallback; feedback saves, re-embeds, and boosts the next match. PR #14 added the validated design: bottom tabs, Your Circle (1st-degree graph), hosted events, invite accept/decline, mark-hangout-done (forms edges, starts a 24h chat/photo window), a 3-way feedback signal, contact exchange, photos, notifications, and **server-side redaction of anyone past 1st degree**.
 
-**Live now (checked Sep 26):** production (`https://degrees-api.netlify.app`) runs the PR #13 server, and the shared Supabase project has migrations 0001–0005. **PR #14 is not live**: `0006` isn't applied and the server isn't redeployed — do both in the same window (see [supabase/AGENTS.md](./supabase/AGENTS.md)). Until then the app on `main` and the live server disagree on feedback and group shapes.
+**Live (checked Sep 26):** production (`https://degrees-api.netlify.app`) runs PR #14's server, and the shared Supabase project has migrations 0001–0006. Server changes need a Netlify redeploy after merge; nothing deploys by itself.
 
 **Known gaps** (owners and order: [docs/ROLES.md](./docs/ROLES.md#next-steps-sep-26)):
-- New signups get no `profiles` row, so `/api/me` and matching fail for any real new account; signup also asks for email, not username.
 - `formGroups` reasoning names people the redaction hides.
 - No route writes notifications; photos don't upload to Storage; the About screen's "Generate tags" is canned.
 
-**Open questions** are at the end of [PRD.md](./PRD.md): Resend usage, the frequency scheduler, and username vs email login. The graph view is resolved (Your Circle). [HANDOFF-SKELETON.md](./HANDOFF-SKELETON.md) is the original web-era brief, kept for history.
+**Auth (Sep 26):** username signup and login work end to end: signup → onboarding → app. The app is gated: signed-out visits go to login and return to the link they opened (e.g. a scanned event QR) afterwards.
+
+**Open questions** are at the end of [PRD.md](./PRD.md): Resend usage and the frequency scheduler. The graph view is resolved (Your Circle). [HANDOFF-SKELETON.md](./HANDOFF-SKELETON.md) is the original web-era brief, kept for history.

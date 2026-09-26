@@ -1,9 +1,11 @@
-// Owner: Charles (Onboarding & Profile) — see docs/ROLES.md.
+// Owner: Charles (Onboarding & Profile) — see docs/ROLES.md. Username login + post-login routing wired by Sahith (Sep 26).
 import { useState } from 'react';
+import { authEmailFor } from '@degrees/shared';
 import { useMutation } from '@tanstack/react-query';
 import { Link, Stack, useRouter } from 'expo-router';
 import { Text, View } from 'react-native';
 import { Body, Button, ErrorState, Field, Screen, Title } from '@/components/ui';
+import { consumePendingHref } from '@/features/auth/session';
 import { api } from '@/lib/api';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from '@/lib/supabase';
 import { useSessionStore } from '@/stores/session';
@@ -11,7 +13,7 @@ import { useSessionStore } from '@/stores/session';
 export function LoginScreen() {
   const router = useRouter();
   const setCurrentUser = useSessionStore((state) => state.setCurrentUser);
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
   const login = useMutation({
@@ -20,16 +22,22 @@ export function LoginScreen() {
       // so there's nothing to authenticate against — just load the mock `me` and continue.
       if (!isSupabaseEnvironmentUnset()) {
         const { error } = await getSupabaseClient().auth.signInWithPassword({
-          email,
+          email: authEmailFor(username),
           password,
         });
-        if (error) throw new Error(error.message);
+        if (error) {
+          throw new Error(
+            error.code === 'invalid_credentials' ? 'Wrong username or password.' : error.message,
+          );
+        }
       }
       return api.getMe();
     },
     onSuccess: (me) => {
       setCurrentUser(me);
-      router.replace('/');
+      // Unfinished profiles resume onboarding; everyone else goes where they were headed (e.g. a scanned
+      // event link), else home.
+      router.replace(me.hasCompletedProfile ? consumePendingHref() : '/onboarding/interests');
     },
   });
 
@@ -44,12 +52,12 @@ export function LoginScreen() {
 
         <View className="gap-4">
           <Field
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
+            label="Username"
+            value={username}
+            onChangeText={setUsername}
             autoCapitalize="none"
-            keyboardType="email-address"
-            placeholder="you@example.com"
+            autoCorrect={false}
+            placeholder="maya.chen"
           />
           <Field
             label="Password"

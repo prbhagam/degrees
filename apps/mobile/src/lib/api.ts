@@ -20,6 +20,8 @@ import type {
   PhotosResponse,
   SendMessageRequest,
   SendMessageResponse,
+  SignupRequest,
+  SignupResponse,
   UpdatePreferencesRequest,
   UpdateProfileRequest,
 } from '@degrees/shared';
@@ -57,15 +59,17 @@ function baseUrl(): string {
 }
 
 async function accessToken(): Promise<string> {
-  if (__DEV__ && isSupabaseEnvironmentUnset()) {
+  if (isSupabaseEnvironmentUnset()) {
+    // No Supabase project configured at all — nothing to authenticate against, so this can only be
+    // pointed at the mock-mode server, which accepts any bearer token.
     return 'dev';
   }
+  // CHANGED Sep 26 (Charles, from #16): this used to also fall back to 'dev' whenever __DEV__ was true and
+  // the user was signed out, even with a real Supabase project configured — so a real-mode server said
+  // "access token is invalid" on every screen instead of "you're not signed in". The auth gate
+  // (features/auth/session.ts) sends signed-out users to /login.
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error || !data.session?.access_token) {
-    if (__DEV__) {
-      // Signed out in dev: the mock-mode server accepts any token, so screens work before sign-in does.
-      return 'dev';
-    }
     throw new ApiError(401, 'unauthorized', 'Sign in before calling the API.');
   }
   return data.session.access_token;
@@ -79,10 +83,16 @@ function parseJson(text: string): unknown {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = await accessToken();
+// `authenticated: false` is only for the public auth routes, which are called before a session exists.
+async function request<T>(
+  path: string,
+  init?: RequestInit,
+  { authenticated = true }: { authenticated?: boolean } = {},
+): Promise<T> {
   const headers = new Headers(init?.headers);
-  headers.set('Authorization', `Bearer ${token}`);
+  if (authenticated) {
+    headers.set('Authorization', `Bearer ${await accessToken()}`);
+  }
   if (init?.body) {
     headers.set('Content-Type', 'application/json');
   }
@@ -115,6 +125,10 @@ const json = (method: string, body: unknown): RequestInit => ({
 const groupPath = (id: string) => `/api/groups/${encodeURIComponent(id)}`;
 
 export const api = {
+  signup: (body: SignupRequest) =>
+    request<SignupResponse>('/api/auth/signup', json('POST', body), {
+      authenticated: false,
+    }),
   getMe: () => request<MeResponse>('/api/me'),
   updateProfile: (body: UpdateProfileRequest) =>
     request<OkResponse>('/api/profile', json('PUT', body)),

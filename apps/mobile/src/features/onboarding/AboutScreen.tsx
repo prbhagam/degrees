@@ -62,7 +62,13 @@ export function AboutScreen() {
           placeholder="Third-year CS major, always down for climbing or a new taco spot."
         />
 
-        <Field label="Home base" value={city} onChangeText={setCity} placeholder="Midtown Atlanta" />
+        <Field
+          label="Home base"
+          hint="Required — this is what we center activity suggestions on."
+          value={city}
+          onChangeText={setCity}
+          placeholder="Midtown Atlanta"
+        />
 
         <Card>
           <Text className="font-body-semibold text-sm text-ink">Or just talk it through</Text>
@@ -127,7 +133,13 @@ export function AboutScreen() {
       </View>
 
       {save.isError ? <ErrorState message={save.error.message} /> : null}
-      <Button label="Next" className="mt-6" loading={save.isPending} onPress={() => save.mutate()} />
+      <Button
+        label="Next"
+        className="mt-6"
+        loading={save.isPending}
+        disabled={!city.trim()}
+        onPress={() => save.mutate()}
+      />
     </Screen>
   );
 }

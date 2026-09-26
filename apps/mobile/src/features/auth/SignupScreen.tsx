@@ -1,5 +1,6 @@
-// Owner: Charles (Onboarding & Profile) — see docs/ROLES.md.
+// Owner: Charles (Onboarding & Profile) — see docs/ROLES.md. Username signup via the server wired by Sahith (Sep 26).
 import { useState } from 'react';
+import { authEmailFor, signupRequestSchema } from '@degrees/shared';
 import { useMutation } from '@tanstack/react-query';
 import { Link, Stack, useRouter } from 'expo-router';
 import { Text, View } from 'react-native';
@@ -15,26 +16,32 @@ export function SignupScreen() {
   const setCurrentUser = useSessionStore((state) => state.setCurrentUser);
   const [name, setName] = useState('');
   const [pronoun, setPronoun] = useState<string | null>(null);
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
 
   const signup = useMutation({
     mutationFn: async () => {
-      if (!isSupabaseEnvironmentUnset()) {
-        const { error } = await getSupabaseClient().auth.signUp({ email, password });
-        if (error) throw new Error(error.message);
-      }
-      // Creates the profile row now; Interests/About/Preferences fill in the rest as they go.
-      await api.updateProfile({
+      const parsed = signupRequestSchema.safeParse({
+        username,
+        password,
         displayName: name,
-        bio: '',
-        aiParagraph: '',
-        city: '',
         phone,
         pronouns: pronoun ?? undefined,
-        tags: [],
       });
+      if (!parsed.success) {
+        throw new Error(parsed.error.issues[0]?.message ?? 'Check the form and try again.');
+      }
+      // The server creates the account (already confirmed) and the profile row in one step;
+      // Interests/About/Preferences fill in the rest.
+      await api.signup(parsed.data);
+      if (!isSupabaseEnvironmentUnset()) {
+        const { error } = await getSupabaseClient().auth.signInWithPassword({
+          email: authEmailFor(parsed.data.username),
+          password,
+        });
+        if (error) throw new Error(error.message);
+      }
       return api.getMe();
     },
     onSuccess: (me) => {
@@ -69,12 +76,13 @@ export function SignupScreen() {
         </View>
 
         <Field
-          label="Email"
-          value={email}
-          onChangeText={setEmail}
+          label="Username"
+          hint="What you'll log in with. Lowercase letters, numbers, dots, underscores."
+          value={username}
+          onChangeText={setUsername}
           autoCapitalize="none"
-          keyboardType="email-address"
-          placeholder="you@example.com"
+          autoCorrect={false}
+          placeholder="alex.okonkwo"
         />
         <Field
           label="Phone number"
@@ -84,7 +92,13 @@ export function SignupScreen() {
           keyboardType="phone-pad"
           placeholder="(404) 555-0148"
         />
-        <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry />
+        <Field
+          label="Password"
+          hint="At least 8 characters."
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry
+        />
       </View>
 
       {signup.isError ? <ErrorState message={signup.error.message} /> : null}
@@ -93,7 +107,7 @@ export function SignupScreen() {
         label="Continue"
         className="mt-6"
         loading={signup.isPending}
-        disabled={!name || !phone}
+        disabled={!name || !phone || !username || !password}
         onPress={() => signup.mutate()}
       />
 

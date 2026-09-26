@@ -25,6 +25,33 @@ export const connectionContextSchema = z.enum([
 export const activitySourceSchema = z.enum(['maps', 'ticketmaster']);
 export const sentimentSchema = z.enum(['positive', 'neutral', 'negative']);
 
+// Added Sep 26 — server-side signup. Supabase Auth runs on email + password; people sign in with a username,
+// which maps to `<username>@degrees.demo` (PRD rule 9, and how the seeded demo logins work).
+export const AUTH_EMAIL_DOMAIN = 'degrees.demo';
+
+export const usernameSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(
+    /^[a-z0-9._]{3,20}$/,
+    'Usernames are 3–20 characters: lowercase letters, numbers, dots, or underscores.',
+  );
+
+// A username becomes its auth email; anything already containing "@" is used as-is (older accounts).
+export function authEmailFor(usernameOrEmail: string): string {
+  const value = usernameOrEmail.trim().toLowerCase();
+  return value.includes('@') ? value : `${value}@${AUTH_EMAIL_DOMAIN}`;
+}
+
+export const signupRequestSchema = z.object({
+  username: usernameSchema,
+  password: z.string().min(8, 'Passwords need at least 8 characters.'),
+  displayName: z.string().trim().min(1, 'Add your name.'),
+  phone: z.string().trim().min(7, 'Add a phone number.'),
+  pronouns: z.string().trim().optional(),
+});
+
 export const updateProfileRequestSchema = z.object({
   displayName: z.string(),
   bio: z.string(),

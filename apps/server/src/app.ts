@@ -5,6 +5,7 @@ import type { ApiErrorBody, OkResponse } from '@degrees/shared';
 import { env } from './config/env.js';
 import { ApiError, errorBody } from './lib/errors.js';
 import { requireAuth, type AppEnv } from './middleware/auth.js';
+import { authRoutes } from './routes/auth.js';
 import { connectionRoutes } from './routes/connections.js';
 import { eventRoutes } from './routes/events.js';
 import { feedbackRoutes } from './routes/feedback.js';
@@ -34,6 +35,9 @@ export function createApp(): Hono<AppEnv> {
     const response = { ok: true } satisfies OkResponse;
     return context.json(response);
   });
+
+  // Public routes first: a matched handler that returns ends the chain, so requireAuth below never runs for them.
+  app.route('/api', authRoutes);
 
   const api = new Hono<AppEnv>();
   api.use('*', requireAuth);

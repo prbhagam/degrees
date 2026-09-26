@@ -13,7 +13,9 @@ import {
   PublicSans_600SemiBold,
   PublicSans_700Bold,
 } from '@expo-google-fonts/public-sans';
+import { AuthGate, useAuthSubscription } from '@/features/auth/session';
 import { queryClient } from '@/lib/query';
+import { useSessionStore } from '@/stores/session';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -27,11 +29,15 @@ export default function RootLayout() {
     PublicSans_700Bold,
   });
 
-  useEffect(() => {
-    if (fontsLoaded) SplashScreen.hideAsync();
-  }, [fontsLoaded]);
+  useAuthSubscription();
+  const authLoading = useSessionStore((state) => state.authStatus === 'loading');
 
-  if (!fontsLoaded) return null;
+  // The splash stays up until the saved session is restored, so no screen renders signed-out first.
+  useEffect(() => {
+    if (fontsLoaded && !authLoading) SplashScreen.hideAsync();
+  }, [fontsLoaded, authLoading]);
+
+  if (!fontsLoaded || authLoading) return null;
 
   return (
     <QueryClientProvider client={queryClient}>
@@ -47,6 +53,7 @@ export default function RootLayout() {
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
+      <AuthGate />
       <StatusBar style="auto" />
     </QueryClientProvider>
   );
