@@ -5,7 +5,10 @@
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["packages/shared/**", "apps/server/**"]
+  # No included_files: esbuild inlines @degrees/shared and every server module into api.mjs, so the globs
+  # ("packages/shared/**", "apps/server/**") added nothing to the artifact (verified Sep 26: byte-identical zip
+  # with and without them) while making the packager walk the whole server tree — which hung a local
+  # `netlify deploy` on Windows at "Packaging Functions: api.ts". Nothing reads source files at runtime.
   # No `timeout` override: the account is on a legacy plan (10s synchronous limit, no Background Functions).
   # Long AI work runs as a resumable job, one external call per request — see apps/server/src/ai/generateActivity.ts.
 
