@@ -57,6 +57,10 @@ async function accessToken(): Promise<string> {
   }
   const { data, error } = await getSupabaseClient().auth.getSession();
   if (error || !data.session?.access_token) {
+    if (__DEV__) {
+      // Signed out in dev: the mock-mode server accepts any token, so screens work before sign-in does.
+      return 'dev';
+    }
     throw new ApiError(401, 'unauthorized', 'Sign in before calling the API.');
   }
   return data.session.access_token;

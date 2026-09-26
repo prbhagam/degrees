@@ -11,12 +11,15 @@ The Degrees iOS app: **Expo SDK 57 · React Native 0.86 · Expo Router · Native
 ```
 src/app/                 Expo Router routes. Every file is a screen; _layout.tsx files are navigators.
   _layout.tsx            providers (TanStack Query) + root Stack. Rarely changes.
-  index.tsx              dev navigation to every screen. Replace with the real home.
+  index.tsx              home hub → features/home (Pranav): your groups, find a group, meet someone, join an event
   login.tsx signup.tsx                     → features/auth        (Charles)
   onboarding/{interests,preferences}.tsx   → features/onboarding  (Charles)
   profile.tsx                              → features/profile     (Charles)
   groups/[id]/feedback.tsx                 → features/feedback    (Charles)
   join/index.tsx  join/[roomCode].tsx      → features/events      (Pranav)
+  connect/index.tsx  connect/[peerId].tsx  → features/events      (Pranav) my QR · deep-link target that forms an edge
+  scan.tsx                                 → features/events      (Pranav) one scanner for event + person QR codes
+  match.tsx                                → features/groups      (Pranav) runs matching, then opens the group
   groups/[id]/index.tsx                    → features/groups      (Pranav)
   groups/[id]/activity.tsx                 → features/activity    (Pranav)
   groups/[id]/chat.tsx                     → features/chat        (Pranav)
@@ -43,7 +46,7 @@ To add a screen:
 
 You never edit another feature's files, and you never edit `_layout.tsx` just to register a route. Keep all non-route code out of `src/app/`.
 
-Deep links come free from the `degrees` scheme in `app.json`. For example, `degrees://join/HACKGT` opens `join/[roomCode].tsx`. The event QR code should encode that link.
+Deep links come free from the `degrees` scheme in `app.json`. For example, `degrees://join/HACKGT` opens `join/[roomCode].tsx`. **In Expo Go the scheme is `exp://<ip>:8081/--/join/HACKGT` instead**, so build QR links with `Linking.createURL()` (see `features/events/links.ts`), never a hard-coded `degrees://`. The in-app scanner accepts both forms.
 
 ## Data rules
 

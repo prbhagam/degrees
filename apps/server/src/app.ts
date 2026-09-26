@@ -1,5 +1,6 @@
 // Owner: Christian (Server & Infra)
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import type { ApiErrorBody, OkResponse } from '@degrees/shared';
 import { env } from './config/env.js';
 import { ApiError, errorBody } from './lib/errors.js';
@@ -16,6 +17,17 @@ import { profileRoutes } from './routes/profile.js';
 
 export function createApp(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  app.use(
+    '*',
+    cors({
+      origin: '*',
+      allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowHeaders: ['Content-Type', 'Authorization'],
+      exposeHeaders: ['Content-Length'],
+      maxAge: 86400,
+    }),
+  );
 
   app.get('/health', (context) => {
     const response = { ok: true } satisfies OkResponse;
