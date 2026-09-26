@@ -4,6 +4,8 @@
 
 Owned by Sahith. Argue with it at H0, then freeze — four people build against it.
 
+Implemented in [`supabase/migrations/0001_init.sql`](../supabase/migrations/0001_init.sql). Its header lists every addition beyond this doc (UUID defaults, `event_attendees` FKs, enum checks, indexes, RLS policies, the Realtime publication).
+
 ---
 
 ## Schema

@@ -26,7 +26,11 @@ export async function validateJson<T>(
   try {
     body = await context.req.json();
   } catch {
-    throw new ApiError(400, 'invalid_request', 'Request body must be valid JSON.');
+    throw new ApiError(
+      400,
+      'invalid_request',
+      'Request body must be valid JSON.',
+    );
   }
 
   const result = schema.safeParse(body);

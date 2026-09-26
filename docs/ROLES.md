@@ -29,7 +29,7 @@ The server everything else depends on, and the deploy pipeline that makes it rea
 - Supabase service-role client; the anon-read / service-write split
 - `@google/genai` wrapper; **all four AI calls live here**
 - `generateActivity` (Maps grounding) and `analyzeFeedback`
-- Netlify site; env and secret management
+- Expo/EAS project and TestFlight builds; env and secret management
 - **Deliverable:** a **public URL with a working health check by H4** — not H25
 - **Boundary:** Christian owns the server framework, auth, deploy, and the Gemini client. Sahith owns schema and the matching module inside it.
 
@@ -37,7 +37,7 @@ The server everything else depends on, and the deploy pipeline that makes it rea
 
 Everything from signup to a complete profile, plus the feedback loop.
 
-- H0–H2: React + Vite scaffold, routing, shared component kit — the "build once" burst everyone consumes
+- H0–H2: shared component kit on the Expo scaffold (`apps/mobile`, already routed) — the "build once" burst everyone consumes
 - Supabase auth screens (username + password)
 - **Interests page** — tag selection, bio, optional AI paragraph
 - **Preferences page** — cost, distance, frequency, **group size range**, **degrees of separation**
@@ -66,7 +66,7 @@ Pitch, polish, rehearsal, and the backup video are **all four**, not a role.
 
 | Hours | Sahith | Christian | Charles | Pranav |
 |---|---|---|---|---|
-| **H0–H2** | Schema + migrations; **seed graph** | Provision Vultr; billing ON; server skeleton | React scaffold + component kit | Maps grounding spike |
+| **H0–H2** | Schema + migrations; **seed graph** | Provision Vultr; billing ON; server skeleton | Component kit on the Expo scaffold | Maps grounding spike |
 | **H2–H6** | pgvector; embed seeded profiles | **Public URL + health check (H4)**; JWT verify | Auth + interests page | QR join + `POST /api/connections` |
 | **H6–H12** | Degree traversal; narrowing query | `embedProfile`; Gemini wrapper | Preferences page | Group view off seed data |
 | **H12–H18** | `formGroups` prompt; **matching returns real groups (H14 GATE)** | `generateActivity` + Maps grounding | Feedback flow | Activity display |

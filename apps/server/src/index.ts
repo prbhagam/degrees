@@ -1,7 +1,6 @@
 // Owner: Christian (Server & Infra) — tsx is intentionally a runtime dependency because start executes TypeScript source.
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
-import { cors } from 'hono/cors';
 import type { ApiErrorBody, OkResponse } from '@degrees/shared';
 import { env } from './config/env.js';
 import { ApiError, errorBody } from './lib/errors.js';
@@ -18,7 +17,6 @@ import { profileRoutes } from './routes/profile.js';
 
 const app = new Hono<AppEnv>();
 
-app.use('*', cors({ origin: env.webOrigin }));
 app.get('/health', (context) => {
   const response = { ok: true } satisfies OkResponse;
   return context.json(response);
@@ -49,10 +47,14 @@ app.onError((error, context) => {
   }
   console.error(error);
   const message =
-    env.nodeEnv === 'production' ? 'An unexpected error occurred.' : error.message;
+    env.nodeEnv === 'production'
+      ? 'An unexpected error occurred.'
+      : error.message;
   const response: ApiErrorBody = errorBody('internal_error', message);
   return context.json(response, 500);
 });
 
-console.log(`Degrees API starting on :${env.port} (${env.mockMode ? 'mock' : 'real'} mode)`);
+console.log(
+  `Degrees API starting on :${env.port} (${env.mockMode ? 'mock' : 'real'} mode)`,
+);
 serve({ fetch: app.fetch, port: env.port });

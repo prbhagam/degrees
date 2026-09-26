@@ -2,7 +2,7 @@
 
 **Degrees** · lock these at H0, before anyone writes a line.
 
-This file is what makes four people concurrent. Frontend builds against stubs matching these shapes; the server fills them in. Nobody blocks after H2.
+This file is what makes four people concurrent. It is implemented as TypeScript types + Zod schemas in [`packages/shared`](../packages/shared/src) — change both together. Frontend builds against stubs matching these shapes; the server fills them in. Nobody blocks after H2.
 
 **Base:** `https://api.degrees.tech`
 **Auth:** every endpoint requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
@@ -79,7 +79,7 @@ POST /api/groups/:id/feedback
 
 ## Internal AI services
 
-Server-side only. Never exposed to the client, never called from the browser.
+Server-side only. Never exposed to the client, never called from the app.
 
 ```ts
 embedProfile(userId: string): Promise<void>

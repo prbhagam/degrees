@@ -10,7 +10,11 @@ export const feedbackRoutes = new Hono<AppEnv>().post(
   '/groups/:id/feedback',
   async (context) => {
     if (context.req.param('id') !== DEMO_GROUP_ID) {
-      throw new ApiError(404, 'group_not_found', 'The requested group does not exist.');
+      throw new ApiError(
+        404,
+        'group_not_found',
+        'The requested group does not exist.',
+      );
     }
     const request = await validateJson(context, feedbackRequestSchema);
     const analysis = request.freeText

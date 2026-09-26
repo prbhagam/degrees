@@ -10,7 +10,7 @@ The single most important rule: **the application server owns every AI call and 
 
 ```
 ┌─────────────────┐
-│  React SPA      │  Netlify · degrees.tech
+│  iOS app        │  Expo / React Native · TestFlight
 │  (thin client)  │
 └────────┬────────┘
          │
@@ -28,7 +28,7 @@ The single most important rule: **the application server owns every AI call and 
                                └──► Ticketmaster Discovery (secondary)
 ```
 
-**Thin client, server-heavy.** State lives on the server so it syncs across devices. Avoid optimistic local state — read through TanStack Query and let the server be the source of truth.
+**Thin client, server-heavy.** The client is a React Native app built with Expo (changed Sep 25 from a React web SPA — see [STACK.md](./STACK.md)). State lives on the server so it syncs across devices. Avoid optimistic local state — read through TanStack Query and let the server be the source of truth.
 
 ---
 
@@ -44,9 +44,9 @@ Supabase Edge Functions are serverless. Matching needs to hold a candidate pool 
 
 | Key | Lives | Can do |
 |---|---|---|
-| Supabase **anon key** | Client bundle (public) | Reads only, constrained by Row Level Security |
+| Supabase **anon (publishable) key** | App bundle (public — anyone can extract it) | Reads only, constrained by Row Level Security |
 | Supabase **service role key** | **Server env only** | Full read/write. Never ships to the client, never enters git. |
-| **Gemini API key** | **Server env only** | All model calls. Never reaches the browser. |
+| **Gemini API key** | **Server env only** | All model calls. Never reaches the app. |
 
 **Request flow:** Supabase Auth issues a JWT on login. The client sends it as `Authorization: Bearer <jwt>` on every API call. **The server verifies the token on every request** and derives the user id from it — never from the request body.
 
@@ -96,10 +96,10 @@ Ticketmaster Discovery free tier: 5,000 calls/day, 5 req/sec. Cache responses pe
 
 | Piece | Where | Notes |
 |---|---|---|
-| Frontend | Netlify | Deploy on push to main |
+| iOS app | Expo | Dev: Expo Go on a phone. Testers + demo: EAS Build → TestFlight. `ios/` is generated, never committed. |
 | API server | Vultr VPS | Node + TypeScript behind nginx, TLS via Let's Encrypt |
 | Database | Supabase | Managed Postgres + pgvector + Auth |
-| Domain | `degrees.tech` | Free .tech for a year. Server IP is an acceptable demo fallback. |
+| Domain | `api.degrees.tech` | Free .tech for a year. A bare server IP works in dev only — iOS release builds require HTTPS (App Transport Security). |
 | Email | Resend free tier | Transactional only. **Verification off for the demo** so venue signups aren't blocked. |
 
 **A public URL must exist by H4**, serving a health check from the real server. Not H25.

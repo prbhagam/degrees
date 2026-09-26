@@ -7,9 +7,13 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "concurrently -n server,web -c blue,magenta --kill-others-on-fail \"npm run dev -w @degrees/server\" \"npm run dev -w @degrees/web\"",
-    "typecheck": "npm run typecheck -w @degrees/shared -w @degrees/server -w @degrees/web && tsc -p supabase/tsconfig.json --noEmit",
-    "build": "npm run build -w @degrees/web",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "npm run dev -w @degrees/server",
+    "dev:mobile": "npm run start -w @degrees/mobile",
+    "ios": "npm run ios -w @degrees/mobile",
+    "typecheck": "npm run typecheck -w @degrees/shared -w @degrees/server -w @degrees/mobile && tsc -p supabase/tsconfig.json --noEmit",
+    "export:ios": "npm run export:ios -w @degrees/mobile",
+    "doctor": "npm run doctor -w @degrees/mobile",
     "seed": "tsx supabase/seed/seed.ts"
   },
   "engines": {
@@ -18,9 +22,11 @@
   "packageManager": "npm@11.19.1",
   "devDependencies": {
     "@supabase/supabase-js": "^2.57.4",
-    "concurrently": "^9.2.1",
     "prettier": "^3.6.2",
     "tsx": "^4.20.5",
     "typescript": "6.0.3"
+  },
+  "overrides": {
+    "react": "19.2.3"
   }
 }

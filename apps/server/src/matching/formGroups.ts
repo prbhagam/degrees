@@ -6,7 +6,11 @@ export async function formGroups(
 ): Promise<FormGroupsOutput> {
   // TODO(Sahith): use a soft size constraint and fall back to top-N similarity if Gemini fails.
   return Promise.resolve({
-    memberIds: [input.requesterId, ...input.candidates.slice(0, 3).map(({ id }) => id)],
-    reasoning: 'Local matching stub: candidates share compatible interests and constraints.',
+    memberIds: [
+      input.requesterId,
+      ...input.candidates.slice(0, 3).map(({ id }) => id),
+    ],
+    reasoning:
+      'Local matching stub: candidates share compatible interests and constraints.',
   });
 }
