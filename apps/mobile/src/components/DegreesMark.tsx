@@ -7,16 +7,19 @@
 // ascender, exactly as designed.
 //
 // Animated (loading indicator, and the tail of the splash), it runs a repeating three-beat cycle: the ink "d"
-// shrinks away as an ember ring fades in at a spot parked opposite the ring's resting spot (far enough past the
-// letter that the orbit never crosses it), while an ember ring the shape of the old one grows and fades away as
-// the new ink "d" fades in behind it — the fade is what reads as ink gradienting to ember and back, not a color
-// animation on either shape — then the parked ring sweeps counterclockwise exactly halfway round the letter,
-// landing back at the ring's original top-right spot — then it repeats. `loop={false}` runs the cycle once and
-// calls `onDone`, settled at the same resting pose it started from.
+// shrinks toward a spot parked opposite the ring's resting spot (far enough past the letter that the orbit
+// never crosses it) while an ember ring already sits there, growing in — and at the same time an ember ring the
+// shape of the old one grows toward the d's footprint while an ink d already sits there, growing in. Both pairs
+// move AND cross-dissolve continuously across the same window (not staged move-then-fade), so the two shapes
+// overlap and blend the whole time they're in motion — that overlap, one shape thinning as the other solidifies
+// over the same patch of screen, is what reads as morphing in shape and color, not two separate cuts. Then the
+// parked ring sweeps counterclockwise exactly halfway round the letter, landing back at the ring's original
+// top-right spot — then it repeats. `loop={false}` runs the cycle once and calls `onDone`, settled at the same
+// resting pose it started from.
 //
 // Colour is always a static prop, never animated through useAnimatedStyle: Reanimated's fast path doesn't
-// reliably drive Image#tintColor per frame, so every element keeps one fixed tint for its whole lifetime and
-// the gradient is an illusion of the crossfade.
+// reliably drive Image#tintColor per frame. Each shape keeps one fixed tint for its whole life (d always ink,
+// ring always ember) — the color "change" is entirely the crossfade between an ink shape and an ember shape.
 //
 // Every useAnimatedStyle below is fully self-contained (no shared helper function that itself calls a hook, no
 // worklet calling another worklet for the *whole* computation) — some math is repeated between the two
@@ -73,10 +76,6 @@ const RING_GROWN = { left: D_CENTER.x - D_POSE.height / 2, top: D_CENTER.y - D_P
 
 const MORPH_MS = 900;
 const SETTLE_MS = 400;
-// The morph is two distinct beats, not one blended crossfade: first the departing shape physically moves and
-// shrinks/grows at FULL opacity (nothing else on screen to dilute it, so the motion is unmistakable) — only
-// once it's finished travelling does it fade out, while the arriving shape fades in at its fixed destination.
-const MOVE_FRACTION = 0.6;
 
 export function DegreesMark({
   size = 48,
@@ -113,67 +112,62 @@ export function DegreesMark({
     }
   }, [animated, loop, master, onDone, totalMs]);
 
-  // Transitional: the old ink d, moving from D_POSE to the park spot at full opacity, then fading out.
+  // The old ink d: moves and cross-dissolves continuously from D_POSE to the park spot across the whole morph.
   const dShrinkingStyle = useAnimatedStyle(() => {
     'worklet';
-    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
-    const moveT = Easing.inOut(Easing.cubic)(interpolate(raw, [0, MOVE_FRACTION], [0, 1], Extrapolation.CLAMP));
-    const fadeT = Easing.inOut(Easing.cubic)(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
-    const left = D_POSE.left + moveT * (D_SHRUNK.left - D_POSE.left);
-    const top = D_POSE.top + moveT * (D_SHRUNK.top - D_POSE.top);
-    const width = D_POSE.width + moveT * (D_SHRUNK.width - D_POSE.width);
-    const height = D_POSE.height + moveT * (D_SHRUNK.height - D_POSE.height);
+    const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
+    const left = D_POSE.left + t * (D_SHRUNK.left - D_POSE.left);
+    const top = D_POSE.top + t * (D_SHRUNK.top - D_POSE.top);
+    const width = D_POSE.width + t * (D_SHRUNK.width - D_POSE.width);
+    const height = D_POSE.height + t * (D_SHRUNK.height - D_POSE.height);
     return {
       position: 'absolute',
       left: left * size,
       top: top * size,
       width: width * size,
       height: height * size,
-      opacity: 1 - fadeT,
+      opacity: 1 - t,
     };
   });
 
-  // Transitional: the old ember ring, swelling from RING_TOPRIGHT toward the d's footprint, then fading out.
+  // The old ember ring: moves and cross-dissolves continuously from RING_TOPRIGHT toward the d's footprint.
   const ringGrowingStyle = useAnimatedStyle(() => {
     'worklet';
-    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
-    const moveT = Easing.inOut(Easing.cubic)(interpolate(raw, [0, MOVE_FRACTION], [0, 1], Extrapolation.CLAMP));
-    const fadeT = Easing.inOut(Easing.cubic)(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
-    const left = RING_TOPRIGHT.left + moveT * (RING_GROWN.left - RING_TOPRIGHT.left);
-    const top = RING_TOPRIGHT.top + moveT * (RING_GROWN.top - RING_TOPRIGHT.top);
-    const width = RING_TOPRIGHT.width + moveT * (RING_GROWN.width - RING_TOPRIGHT.width);
-    const height = RING_TOPRIGHT.height + moveT * (RING_GROWN.height - RING_TOPRIGHT.height);
+    const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
+    const left = RING_TOPRIGHT.left + t * (RING_GROWN.left - RING_TOPRIGHT.left);
+    const top = RING_TOPRIGHT.top + t * (RING_GROWN.top - RING_TOPRIGHT.top);
+    const width = RING_TOPRIGHT.width + t * (RING_GROWN.width - RING_TOPRIGHT.width);
+    const height = RING_TOPRIGHT.height + t * (RING_GROWN.height - RING_TOPRIGHT.height);
     return {
       position: 'absolute',
       left: left * size,
       top: top * size,
       width: width * size,
       height: height * size,
-      opacity: 1 - fadeT,
+      opacity: 1 - t,
     };
   });
 
-  // Stable: the new ink d, fixed at D_POSE, fading in once the departing shapes finish moving.
+  // The new ink d: fixed at D_POSE, fading in across the same window the old d is fading out over — the
+  // overlap (old d thinning, new d solidifying at the spot the old one is shrinking away from) is the "morph".
   const dFadeInStyle = useAnimatedStyle(() => {
     'worklet';
-    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
-    const fadeT = Easing.inOut(Easing.cubic)(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
+    const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
     return {
       position: 'absolute',
       left: D_POSE.left * size,
       top: D_POSE.top * size,
       width: D_POSE.width * size,
       height: D_POSE.height * size,
-      opacity: fadeT,
+      opacity: t,
     };
   });
 
-  // Stable: the new ember ring — fades in at the park spot once the departing shapes finish moving, then sweeps
-  // counterclockwise halfway round the letter to its resting spot.
+  // The new ember ring: fades in at the park spot across the same window, then sweeps counterclockwise halfway
+  // round the letter to its resting spot.
   const ringOrbitStyle = useAnimatedStyle(() => {
     'worklet';
-    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
-    const fadeT = Easing.inOut(Easing.cubic)(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
+    const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
     const orbitT = Easing.inOut(Easing.cubic)(interpolate(master.value, [mMorph, mOrbit], [0, 1], Extrapolation.CLAMP));
     const angle = ((PARK_ANGLE - 180 * orbitT) * Math.PI) / 180;
     const cx = D_CENTER.x * size;
@@ -186,7 +180,7 @@ export function DegreesMark({
       top: cy + r * Math.sin(angle) - ringSize / 2,
       width: ringSize,
       height: ringSize,
-      opacity: fadeT,
+      opacity: t,
     };
   });
 

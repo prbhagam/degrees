@@ -86,9 +86,10 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   const ringStyle = useAnimatedStyle(() => ({ opacity: ringOpacity.value }));
   const cursorStyle = useAnimatedStyle(() => {
     const box = cursorAtRing.value > 0.5 ? RING_TOPRIGHT : D_POSE;
+    // After the glyph, not before it: a typing cursor trails the character it just placed.
     return {
       opacity: cursorBlink.value,
-      left: px(box.left),
+      left: px(box.left + box.width),
       top: px(box.top),
       height: px(box.height),
     };
