@@ -2,7 +2,8 @@
 -- The inverse of purge_demo_users.sql. Run in the Supabase SQL Editor (or psql) as postgres / service role.
 --
 -- 0002's 12 Georgia Tech people, graph, completed groups, feedback, and HACKGT meetup (migrations/0002_seed_georgia_tech_demo.sql),
--- plus 48 more accounts (13–60, added Sep 27) across Atlanta campuses in eight friend circles, with 10 avoid tags,
+-- plus 48 more accounts (13–60, added Sep 27) across Atlanta campuses in eight friend circles, 76 seeded-random
+-- extra connections among them, 10 avoid tags,
 -- written against today's schema (0002 predates 0006–0011: feedback_peers.relationship, groups.kind/completed_at,
 -- events.group_id, group_members.accepted_at, activities.status/created_at).
 -- Differences from what 0002 + the later backfills left on the shared project, on purpose:
@@ -450,6 +451,34 @@ on conflict (user_a, user_b) do update set
   met_context = excluded.met_context,
   event_id = excluded.event_id;
 
+-- ---- extra random connections among the demo accounts (added Sep 27) ------------------------------------
+-- 76 more edges on top of the hand-made 72, picked by a seeded md5 roll per pair: repeatable (a re-run gives the
+-- same graph) but with no hand-made pattern. People in the same interest cluster connect at 15%, anyone else at 5%.
+-- Left out on purpose: Maya (1) and her 1st-degree friends (2, 3), so her default 2-degree demo is unchanged;
+-- pairs among the original 12 (their graph stays 0002's); and 59–60, who have no connections yet.
+with pairs as (
+  select
+    a.id as a_id,
+    b.id as b_id,
+    ('x' || left(md5('degrees-demo-' || a.position || '-' || b.position), 7))::bit(28)::int % 100 as roll,
+    ('x' || substr(md5('degrees-demo-' || a.position || '-' || b.position), 8, 7))::bit(28)::int as salt,
+    a.embedding_cluster = b.embedding_cluster as same_cluster
+  from _demo_people a
+  join _demo_people b on a.position < b.position
+  where a.position between 4 and 58
+    and b.position between 13 and 58
+)
+insert into public.connections (user_a, user_b, met_at, met_context, event_id)
+select
+  least(a_id, b_id),
+  greatest(a_id, b_id),
+  now() - make_interval(days => 1 + salt % 90),
+  case when salt % 3 = 0 then 'manual' else 'qr' end,
+  null
+from pairs
+where roll < case when same_cluster then 15 else 5 end
+on conflict (user_a, user_b) do nothing;
+
 -- ---- two completed matched groups, with plans and feedback (the "feedback improved matching" beat) --------
 insert into public.groups (id, kind, formed_at, reasoning, status, completed_at)
 values
@@ -611,7 +640,7 @@ on conflict (feedback_id, peer_id) do update set
 end;
 $seed$;
 
--- Verification: 60 / 60 / 72 / 2 / 24 / 1 / 12, and invalid_connection_order 0.
+-- Verification: 60 / 60 / 148 / 2 / 24 / 1 / 12, and invalid_connection_order 0.
 select
   (select count(*) from auth.users where lower(email) like '%@degrees.demo') as demo_auth_users,
   (

@@ -37,11 +37,15 @@ begin
   perform pg_temp.assert_eq('demo preferences', (select count(*) from public.preferences where user_id::text like 'd0000000-%'), 60);
   perform pg_temp.assert_eq('demo connections', (
     select count(*) from public.connections where user_a::text like 'd0000000-%' and user_b::text like 'd0000000-%'
-  ), 72);
+  ), 148);
   perform pg_temp.assert_eq('second-degree path 1-2-4 exists', (
     select count(*) from public.connections
     where (user_a, user_b) in ((pg_temp.pid(1), pg_temp.pid(2)), (pg_temp.pid(2), pg_temp.pid(4)))
   ), 2);
+  perform pg_temp.assert_eq('every account 4-58 has at least 2 connections', (
+    select count(*) from generate_series(4, 58) n
+    where (select count(*) from public.connections c where pg_temp.pid(n) in (c.user_a, c.user_b)) < 2
+  ), 0);
   perform pg_temp.assert_eq('59 and 60 have no connections yet', (
     select count(*) from public.connections
     where pg_temp.pid(59) in (user_a, user_b) or pg_temp.pid(60) in (user_a, user_b)

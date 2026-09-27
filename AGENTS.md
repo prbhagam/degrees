@@ -87,6 +87,7 @@ No `.env` is needed to start. The server runs in **mock mode**, accepting any be
 - Contracts in [API-CONTRACTS.md](./docs/API-CONTRACTS.md) are frozen — if you need a shape change, say so explicitly rather than changing it locally; three other people build against it.
 - Errors: `{ error: { code, message } }` with a real HTTP status.
 - `POST /api/connections` and event joins are idempotent — people scan twice.
+- **Every PR requests review from every other collaborator.** Look them up rather than hardcoding (`gh api repos/prbhagam/degrees/collaborators --jq '.[].login'`), drop yourself (GitHub won't let the author review), and pass the rest with `gh pr create --reviewer a,b,c`.
 
 ---
 
