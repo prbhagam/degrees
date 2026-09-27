@@ -8,6 +8,8 @@ import type {
   CreateEventRequest,
   CreateEventResponse,
   ExchangeResponse,
+  ExtractTagsRequest,
+  ExtractTagsResponse,
   FeedbackRequest,
   FeedbackResponse,
   GraphResponse,
@@ -23,6 +25,7 @@ import type {
   OkResponse,
   PhotosResponse,
   ProposeTimeRequest,
+  ReachResponse,
   SendMessageRequest,
   SendMessageResponse,
   SignupRequest,
@@ -30,9 +33,11 @@ import type {
   TimesResponse,
   TimeVoteRequest,
   UpdateNotificationSettingsRequest,
+  UpdatePhotoRequest,
   UpdatePreferencesRequest,
   UpdateProfileRequest,
 } from '@degrees/shared';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import Constants from 'expo-constants';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from './supabase';
 
@@ -91,11 +96,32 @@ function parseJson(text: string): unknown {
   }
 }
 
+// Added Sep 27 (wave 6; after fix/token-invalidation-and-spacing): the server rejected our access token. It used to
+// surface as an error card on every screen, forever, because the stale session on disk was never questioned. Try one
+// refresh (an expired token the auto-refresh missed while the phone slept); if Supabase rejects the refresh too
+// (deleted user, revoked session) sign out locally, and the auth listener clears the caches and the gate sends the
+// person to /login. A network failure is not a rejection, so it never signs anyone out. Concurrent 401s share one try.
+let recovering: Promise<boolean> | null = null;
+function recoverSession(): Promise<boolean> {
+  recovering ??= (async () => {
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.auth.refreshSession();
+    if (!error && data.session) return true;
+    if (error && isAuthRetryableFetchError(error)) return false;
+    console.warn('[auth] the session was rejected; signing out:', error?.message ?? 'no session');
+    await supabase.auth.signOut({ scope: 'local' });
+    return false;
+  })().finally(() => {
+    recovering = null;
+  });
+  return recovering;
+}
+
 // `authenticated: false` is only for the public auth routes, which are called before a session exists.
 async function request<T>(
   path: string,
   init?: RequestInit,
-  { authenticated = true }: { authenticated?: boolean } = {},
+  { authenticated = true, retried = false }: { authenticated?: boolean; retried?: boolean } = {},
 ): Promise<T> {
   const headers = new Headers(init?.headers);
   if (authenticated) {
@@ -107,6 +133,9 @@ async function request<T>(
   const response = await fetch(`${baseUrl()}${path}`, { ...init, headers });
   const body = parseJson(await response.text());
   if (!response.ok) {
+    if (response.status === 401 && authenticated && !retried && !isSupabaseEnvironmentUnset()) {
+      if (await recoverSession()) return request<T>(path, init, { authenticated, retried: true });
+    }
     const apiError = body as Partial<ApiErrorBody> | undefined;
     throw new ApiError(
       response.status,
@@ -140,11 +169,19 @@ export const api = {
   getMe: () => request<MeResponse>('/api/me'),
   updateProfile: (body: UpdateProfileRequest) =>
     request<OkResponse>('/api/profile', json('PUT', body)),
+  // wave 6: About paragraph → suggested interests + rather-skips (Gemini, server-side).
+  extractTags: (body: ExtractTagsRequest) =>
+    request<ExtractTagsResponse>('/api/profile/tags', json('POST', body)),
+  // wave 6: the avatar alone (signup).
+  updatePhoto: (body: UpdatePhotoRequest) =>
+    request<OkResponse>('/api/profile/photo', json('PUT', body)),
   updatePreferences: (body: UpdatePreferencesRequest) =>
     request<OkResponse>('/api/preferences', json('PUT', body)),
   createConnection: (body: CreateConnectionRequest) =>
     request<CreateConnectionResponse>('/api/connections', json('POST', body)),
   getGraph: () => request<GraphResponse>('/api/graph/me'),
+  // wave 6: real counts for the preferences degree dial.
+  getReach: () => request<ReachResponse>('/api/graph/reach'),
   joinEvent: (roomCode: string) =>
     request<JoinEventResponse>(
       `/api/events/${encodeURIComponent(roomCode)}/join`,

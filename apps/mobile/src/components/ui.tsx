@@ -27,6 +27,12 @@ export function Screen({
       className="flex-1 bg-paper"
       contentContainerClassName="gap-4 p-5 pb-12"
       keyboardShouldPersistTaps="handled"
+      // CHANGED Sep 27 (wave 6; after fix/onboarding-ui-touchups): a bare ScrollView doesn't make room for the
+      // keyboard on iOS, so signup's phone and password fields sat under it. This insets the content by the keyboard
+      // and scrolls the focused field into view (RCTScrollViewComponentView), for every screen built on Screen.
+      // Dragging the list down dismisses the keyboard (the phone pad has no return key).
+      automaticallyAdjustKeyboardInsets
+      keyboardDismissMode="interactive"
       {...props}
     >
       {children}

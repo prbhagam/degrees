@@ -123,6 +123,21 @@ export function redactReasoning(reasoning: string, hiddenNames: string[]): strin
   return text;
 }
 
+// Degrees are relative to whoever is looking: 0 only for the viewer, else their graph distance. When there's no path,
+// fall back to the stored matching degree, and failing that call them "network" (2).
+// CHANGED Sep 27 (wave 6): the stored degree is relative to whoever created the row (the meetup host and the person who
+// ran matching are stored as 0), so a stored 0 means "you" only to that one person. Falling back to it rendered the host
+// as a second "You" for everyone who joined their meetup without having met them.
+export function resolveMemberDegree(
+  memberId: string,
+  viewerId: string,
+  pathDegree: number | undefined,
+  storedDegree: number | null,
+): number {
+  if (memberId === viewerId) return 0;
+  return pathDegree ?? (storedDegree !== null && storedDegree > 0 ? storedDegree : null) ?? 2;
+}
+
 // Chat and photo uploads close this long after a hangout is marked done (the app hides the
 // composer at the same mark; this is the server-side half).
 export const ARCHIVE_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -332,10 +347,8 @@ export async function loadGroup(
   const hiddenNames: string[] = [];
   const members: GroupMember[] = rows.map(({ user_id: id, degree, accepted_at }) => {
     const path = reach.get(id);
-    // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
     // Meetup members have no stored degree (they joined a code) — unreachable means "network", never "you".
-    const resolvedDegree =
-      id === viewerId ? 0 : (path?.degree ?? degree ?? (kind === 'meetup' ? 2 : 0));
+    const resolvedDegree = resolveMemberDegree(id, viewerId, path?.degree, degree);
     // Meetups are people physically in the same room (co-presence shows basic info — see routes/events.ts), so
     // nobody is redacted there. Matched groups keep the rule below.
     const revealed = kind === 'meetup' || resolvedDegree <= 1 || status !== 'proposed';

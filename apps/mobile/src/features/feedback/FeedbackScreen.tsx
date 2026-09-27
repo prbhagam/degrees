@@ -1,15 +1,16 @@
 // Owner: Charles (Onboarding & Profile) — see docs/ROLES.md.
 // CHANGED Sep 26 (wave 3): works for meetups as well as matched groups, and contact exchange moved out to
 // 1st-degree friends (Your Circle), where it's saved — this screen only collects the signal.
+// CHANGED Sep 27 (wave 6): submitting refreshes Home, whose "Awaiting feedback" section it clears.
 import { useState } from 'react';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import type { FeedbackRelationship } from '@degrees/shared';
 import { Star } from 'lucide-react-native';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { Body, Button, Card, Chip, ErrorState, LoadingState, Muted, Screen } from '@/components/ui';
 import { api, ApiError } from '@/lib/api';
-import { useGroup } from '@/features/groups/queries';
+import { queryKeys, useGroup } from '@/features/groups/queries';
 
 const GROUP_TAGS = ['Great vibe', 'Would hang again', 'Ran long', 'Hard to find'];
 const RELATIONSHIP_OPTIONS: { value: FeedbackRelationship; label: string }[] = [
@@ -22,6 +23,7 @@ export function FeedbackScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const group = useGroup(id);
+  const queryClient = useQueryClient();
   const isMeetup = group.data?.kind === 'meetup';
 
   const [rating, setRating] = useState(0);
@@ -44,7 +46,11 @@ export function FeedbackScreen() {
         })),
         freeText: freeText || undefined,
       }),
-    onSuccess: () => setSubmitted(true),
+    onSuccess: () => {
+      setSubmitted(true);
+      // Wave 6: Home's "Awaiting feedback" drops this group once it's answered.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.hangouts });
+    },
   });
 
   if (group.isPending) {

@@ -4,14 +4,19 @@
 // GET /api/hangouts; polls once a minute while focused; pull-to-refresh; and a banner naming what's still
 // missing from onboarding when it was skipped.
 // CHANGED Sep 26 (wave 5, Sahith): the bell shows an ember dot while there's anything unread.
+// CHANGED Sep 27 (wave 6, Sahith): anything waiting on your accept/decline sits at the very top ("Needs your reply");
+// hangouts that ended in the last week and still want your feedback get their own "Awaiting feedback" section; the
+// rest of the past is collapsed behind a toggle. Unnamed groups are titled by who's in them (summaryTitle), and the
+// bell has breathing room from the screen edge.
 import type { HangoutSummary } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
 import { Link, Stack, useRouter, type Href } from 'expo-router';
-import { AlertCircle, Bell, CalendarPlus, ChevronRight, Plus, QrCode, Users } from 'lucide-react-native';
+import { AlertCircle, Bell, CalendarPlus, ChevronDown, ChevronRight, Plus, QrCode, Users } from 'lucide-react-native';
 import { DegreesMark } from '@/components/DegreesMark';
 import { usePullToRefresh } from '@/lib/query';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
+import { summaryTitle } from '@/features/groups/degrees';
 import { useHangouts, useMe } from '@/features/groups/queries';
 import { useUnreadCount } from '@/features/notifications/queries';
 import { Button, Card, Heading, Muted, Screen } from '@/components/ui';
@@ -33,9 +38,13 @@ function KindTag({ kind }: { kind: HangoutSummary['kind'] }) {
   );
 }
 
-function hangoutTitle(hangout: HangoutSummary): string {
-  if (hangout.name) return hangout.name;
-  return hangout.memberCount > 0 ? `Group of ${hangout.memberCount}` : 'Your group';
+// A hangout that ended within this long, and that you haven't left feedback on, is "awaiting feedback".
+const FEEDBACK_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+function awaitsFeedback(hangout: HangoutSummary, now = Date.now()): boolean {
+  if (!hangout.isPast || hangout.feedbackGiven) return false;
+  const ended = hangout.completedAt ?? hangout.scheduledAt ?? hangout.formedAt;
+  return ended !== null && now - new Date(ended).getTime() <= FEEDBACK_WINDOW_MS;
 }
 
 function hangoutSubtitle(hangout: HangoutSummary): string {
@@ -44,7 +53,7 @@ function hangoutSubtitle(hangout: HangoutSummary): string {
     if (hangout.scheduledAt) parts.push(format(parseISO(hangout.scheduledAt), 'EEE MMM d, h:mm a'));
     if (hangout.roomCode) parts.push(`Code ${hangout.roomCode}`);
     parts.push(`${hangout.memberCount} ${hangout.memberCount === 1 ? 'person' : 'people'}`);
-    if (hangout.completedAt) parts.push('Ended · leave feedback');
+    if (hangout.completedAt) parts.push(hangout.feedbackGiven ? 'Ended' : 'Ended · leave feedback');
   } else if (hangout.needsResponse) {
     parts.push('New match — needs your reply');
   } else if (hangout.status === 'proposed') {
@@ -52,7 +61,7 @@ function hangoutSubtitle(hangout: HangoutSummary): string {
     parts.push(`You're in · waiting on ${waiting} ${waiting === 1 ? 'person' : 'people'}`);
   } else {
     parts.push(STATUS_LABEL[hangout.status]);
-    if (hangout.status === 'completed') parts.push('Leave feedback');
+    if (hangout.status === 'completed' && !hangout.feedbackGiven) parts.push('Leave feedback');
   }
   return parts.join(' · ');
 }
@@ -65,7 +74,9 @@ function HangoutRow({ hangout, onPress }: { hangout: HangoutSummary; onPress: ()
           <KindTag kind={hangout.kind} />
           <ChevronRight size={18} color="#8A8378" />
         </View>
-        <Text className="font-body-semibold text-base text-ink">{hangoutTitle(hangout)}</Text>
+        <Text numberOfLines={1} className="font-body-semibold text-base text-ink">
+          {summaryTitle(hangout)}
+        </Text>
         <Muted>{hangoutSubtitle(hangout)}</Muted>
         {hangout.kind === 'matched' && hangout.reasoning ? (
           <Text numberOfLines={2} className="font-body text-sm text-ink">
@@ -151,9 +162,13 @@ export function HomeScreen() {
   const ink = '#20201C';
   const pull = usePullToRefresh(() => Promise.all([hangouts.refetch(), me.refetch()]));
 
+  const [showPast, setShowPast] = useState(false);
   const list = hangouts.data?.hangouts ?? [];
-  const active = list.filter((hangout) => !hangout.isPast);
-  const past = list.filter((hangout) => hangout.isPast);
+  const needsReply = list.filter((hangout) => !hangout.isPast && hangout.needsResponse);
+  const active = list.filter((hangout) => !hangout.isPast && !hangout.needsResponse);
+  const awaitingFeedback = list.filter((hangout) => awaitsFeedback(hangout));
+  const past = list.filter((hangout) => hangout.isPast && !awaitsFeedback(hangout));
+  const open = (hangout: HangoutSummary) => router.push(`/groups/${hangout.id}`);
 
   return (
     <Screen
@@ -168,11 +183,17 @@ export function HomeScreen() {
             </View>
           ),
           headerRight: () => (
-            <View className="flex-row items-center gap-4">
-              <Pressable accessibilityLabel="Notifications" onPress={() => router.push('/notifications')}>
+            // Wave 6: pr-2 + a 36pt target keeps the bell off the screen edge (it sat flush against it).
+            <View className="flex-row items-center gap-4 pr-2">
+              <Pressable
+                accessibilityLabel="Notifications"
+                hitSlop={8}
+                className="h-9 w-9 items-center justify-center"
+                onPress={() => router.push('/notifications')}
+              >
                 <Bell size={20} color={ink} />
                 {unread > 0 ? (
-                  <View className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-paper bg-ember" />
+                  <View className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full border border-paper bg-ember" />
                 ) : null}
               </Pressable>
             </View>
@@ -180,19 +201,41 @@ export function HomeScreen() {
         }}
       />
 
+      {needsReply.length > 0 ? (
+        <View className="gap-3">
+          <Heading>Needs your reply</Heading>
+          {needsReply.map((hangout) => (
+            <HangoutRow key={hangout.id} hangout={hangout} onPress={() => open(hangout)} />
+          ))}
+        </View>
+      ) : null}
+
       {me.data ? <ProfileNag status={me.data.profileStatus} /> : null}
 
       <View className="gap-3">
         <Heading>Your hangouts</Heading>
         {hangouts.isError ? <Muted>{hangouts.error.message}</Muted> : null}
         {active.map((hangout) => (
-          <HangoutRow key={hangout.id} hangout={hangout} onPress={() => router.push(`/groups/${hangout.id}`)} />
+          <HangoutRow key={hangout.id} hangout={hangout} onPress={() => open(hangout)} />
         ))}
-        {hangouts.data && active.length === 0 ? (
+        {hangouts.data && active.length === 0 && needsReply.length === 0 ? (
           <Muted>Nothing on right now. Meet a few people, then find your first group.</Muted>
         ) : null}
         <Button label="Find my group" icon={<Users size={18} color="#F7F3EC" />} onPress={() => router.push('/match')} />
       </View>
+
+      {awaitingFeedback.length > 0 ? (
+        <View className="gap-3">
+          <Heading>Awaiting feedback</Heading>
+          {awaitingFeedback.map((hangout) => (
+            <HangoutRow
+              key={hangout.id}
+              hangout={hangout}
+              onPress={() => router.push(`/groups/${hangout.id}/feedback`)}
+            />
+          ))}
+        </View>
+      ) : null}
 
       <View className="gap-3">
         <Heading>Grow your circle</Heading>
@@ -218,10 +261,23 @@ export function HomeScreen() {
 
       {past.length > 0 ? (
         <View className="gap-3">
-          <Heading>Past</Heading>
-          {past.map((hangout) => (
-            <HangoutRow key={hangout.id} hangout={hangout} onPress={() => router.push(`/groups/${hangout.id}`)} />
-          ))}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showPast }}
+            onPress={() => setShowPast((value) => !value)}
+            className="flex-row items-center justify-between py-1"
+          >
+            <Heading>{`Past · ${past.length}`}</Heading>
+            <View className="flex-row items-center gap-1">
+              <Muted>{showPast ? 'Hide' : 'Show'}</Muted>
+              <View style={{ transform: [{ rotate: showPast ? '180deg' : '0deg' }] }}>
+                <ChevronDown size={16} color="#8A8378" />
+              </View>
+            </View>
+          </Pressable>
+          {showPast
+            ? past.map((hangout) => <HangoutRow key={hangout.id} hangout={hangout} onPress={() => open(hangout)} />)
+            : null}
         </View>
       ) : null}
 

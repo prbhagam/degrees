@@ -22,6 +22,9 @@ import type {
   sendMessageRequestSchema,
   signupRequestSchema,
   updatePreferencesRequestSchema,
+  extractTagsOutputSchema,
+  extractTagsRequestSchema,
+  updatePhotoRequestSchema,
   updateProfileRequestSchema,
 } from './schemas';
 
@@ -77,6 +80,10 @@ export interface ProfileStatus {
 }
 
 export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;
+export type UpdatePhotoRequest = z.infer<typeof updatePhotoRequestSchema>;
+export type ExtractTagsRequest = z.input<typeof extractTagsRequestSchema>;
+export type ExtractTagsOutput = z.infer<typeof extractTagsOutputSchema>;
+export type ExtractTagsResponse = ExtractTagsOutput;
 export type UpdatePreferencesRequest = z.infer<
   typeof updatePreferencesRequestSchema
 >;
@@ -112,6 +119,23 @@ export interface CreateConnectionResponse extends OkResponse {
 // CHANGED Sep 26: the graph view only ever shows 1st-degree connections (people actually met in
 // person) — this is not a browsable directory of the wider matching pool. `mutualEdges` are edges
 // between two of the viewer's own 1st-degree connections who also know each other.
+// Added Sep 27 (wave 6): GET /api/graph/reach — the real numbers behind the preferences degree dial (it used to show
+// a made-up 12 / 140 / 900). Counts only, never identities. Cumulative: `people` is everyone within `degree` of you.
+export interface ReachCount {
+  degree: number;
+  people: number;
+}
+
+export interface ReachResponse {
+  mine: ReachCount[];
+  // The median of the same counts across everyone who has met at least one person, so a brand-new account (all zeros)
+  // can see what the dial grows into. Null until anyone has a connection.
+  typical: ReachCount[] | null;
+}
+
+// Added Sep 27 (wave 6): matched groups never grow past this (the matcher's hard cap); meetups have no cap.
+export const MATCHED_GROUP_MAX = 8;
+
 export interface GraphResponse {
   // CHANGED Sep 26: added bio/photoUrl for Circle's tap-to-view-profile — safe to include because
   // every node here is already a 1st-degree connection (exploreFrom(viewerId, 1)), never a stranger.
@@ -284,6 +308,12 @@ export interface HangoutSummary {
   lastMessage: { body: string; senderName: string; createdAt: string } | null;
   // Added Sep 26 (wave 5): whether chat is open for the viewer (a meetup, or a matched group that's confirmed).
   chatOpen: boolean;
+  // Added Sep 27 (wave 6): full names of the other members the viewer may see (same redaction rule as GroupResponse),
+  // and how many they can't, so Home and Chats title an unnamed group by who's in it instead of "Group of N".
+  memberNames: string[];
+  unrevealedCount: number;
+  // Added Sep 27 (wave 6): the viewer already left feedback, so Home stops asking.
+  feedbackGiven: boolean;
 }
 
 export interface HangoutsResponse {

@@ -12,6 +12,8 @@ This file is what makes four people concurrent. It is implemented as TypeScript 
 
 **CHANGED Sep 26 (wave 5, branch `sahith/wave5-feedback`)** — additive: notifications are finally WRITTEN (`event_changed` joins the type list; `POST /api/notifications/read`; `GET`/`PUT /api/notifications/settings` + `MeResponse.notificationSettings`); the calendar moved from "Host a meetup" to the plan (`GroupResponse.times`, `POST /api/groups/:id/times`, `/times/:timeId/vote`, `/times/:timeId/choose`, `DELETE /times/:timeId`); `HangoutSummary.lastMessage` + `chatOpen` for the Chats tab; `POST /groups/:id/activity/restore` moves the row instead of copying it (no duplicate history); the planner enforces budget and distance. Needs migration `0012`.
 
+**CHANGED Sep 27 (wave 6, branch `sahith/wave6`)** — additive, no migration: `POST /api/events` takes nothing (`name`, `groupSizeMin`, `groupSizeMax` all optional; an unnamed meetup has `name: null` and the app titles it by who's joined); `HangoutSummary` gains `memberNames` + `unrevealedCount` (the other members the viewer may see, same redaction rule as `GroupResponse`) and `feedbackGiven`; new `GET /api/graph/reach` (real headcounts for the degree dial, counts only), `POST /api/profile/tags` (paragraph → suggested interests + avoids, real Gemini call), `PUT /api/profile/photo` (the avatar alone, for signup); `MATCHED_GROUP_MAX` (8) is exported from `@degrees/shared`. `GroupMember.degree` is never 0 for anyone but the viewer (the host used to come back as a second "You").
+
 **Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
 **Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
 
@@ -48,6 +50,19 @@ PUT  /api/profile
     phone, pronouns?, photoUrl?,             // CHANGED Sep 26 — phone required, rest optional
     tags: { label, kind: "hobby"|"activity"|"derived"|"avoid" }[] }   // "avoid" added Sep 26
   → { ok: true }                 // triggers re-embedding server-side
+
+// Added wave 6: the avatar alone — signup sets one before the rest of the profile exists (PUT /api/profile replaces
+// every field, tags included). No re-embed.
+PUT  /api/profile/photo
+  { photoUrl: string }           // the public avatars/<userId>/… URL from Storage
+  → { ok: true }
+
+// Added wave 6: the About paragraph → suggested tags. Saves nothing; the person picks, then PUT /api/profile.
+// Lite then Flash; 503 ai_unavailable when both fail (never canned tags).
+POST /api/profile/tags
+  { text: string (1–2000), knownInterests?: string[], avoidOptions?: string[] }
+  → { interests: string[],       // Title Case; a known label is reused verbatim when it fits
+      avoids: string[] }         // only labels from avoidOptions
   // CHANGED Sep 26: GET /api/me now returns aiParagraph + tags too, so a client that fetches
   // then re-PUTs (e.g. edit profile) can round-trip the full shape without wiping fields it
   // doesn't show in its own form.
@@ -64,6 +79,11 @@ POST /api/connections
   → { ok: true, edgeCreated: boolean }   // idempotent; re-scanning is harmless
   // "qr" connections should always carry eventId — the validated design ties every QR-formed
   // edge to the hangout both people were at; the app refuses to show a scannable code otherwise.
+
+// Added wave 6: the preferences degree dial's real numbers. Counts only, never identities.
+GET  /api/graph/reach
+  → { mine: { degree: 1|2|3, people }[],       // cumulative: everyone within that many degrees of you
+      typical: { degree, people }[] | null }   // the median of the same over everyone with ≥1 connection (cached 5 min)
 
 GET  /api/graph/me
   → { nodes: { id, displayName, bio: string | null, photoUrl: string | null, metAt: string | null,
@@ -100,7 +120,7 @@ POST /api/events/:roomCode/join
 
 // Added Sep 26 — host-created events (previously events could only be joined, never created).
 POST /api/events
-  { name, description?, scheduledAt?: string, city?, groupSizeMin, groupSizeMax }
+  { name?, description?, scheduledAt?: string, city?, groupSizeMin?, groupSizeMax? }   // CHANGED wave 6: all optional; the app sends {}
   → { eventId: string, roomCode: string }
   // wave 2: also creates the backing group (kind 'meetup', status 'confirmed') with the host as a member.
 
@@ -110,7 +130,9 @@ GET  /api/hangouts
                   scheduledAt, completedAt, roomCode (meetups, while valid), hostId, isPast,
                   needsResponse, acceptedCount,                                  // Added wave 4
                   lastMessage: { body, senderName, createdAt } | null,           // Added wave 5 — the Chats tab preview
-                  chatOpen: boolean }[] }                                        // Added wave 5 — meetup, or matched and not 'proposed'
+                  chatOpen: boolean,                                             // Added wave 5 — meetup, or matched and not 'proposed'
+                  memberNames: string[], unrevealedCount: number,                // Added wave 6 — who titles an unnamed group
+                  feedbackGiven: boolean }[] }                                   // Added wave 6 — Home's Awaiting feedback
   // wave 5: scheduledAt is set for matched groups too once a time is chosen (see /times below).
 
 // ---- Matching -------------------------------------------------------------
@@ -384,7 +406,7 @@ analyzeFeedback(freeText: string): Promise<{
 
 ## Writes that bypass the server (Storage only — Added wave 2)
 
-The client uploads image bytes **directly to Supabase Storage** under the storage policies in migration 0007, then tells the API about the object: `event-photos/<groupId>/<file>` (private bucket; only members of that group may write or read the folder; the API returns signed URLs) and `avatars/<userId>/<file>` (public bucket; only the owner may write; the public URL is saved via `PUT /api/profile` `photoUrl`). No client ever writes a database row.
+The client uploads image bytes **directly to Supabase Storage** under the storage policies in migration 0007, then tells the API about the object: `event-photos/<groupId>/<file>` (private bucket; only members of that group may write or read the folder; the API returns signed URLs) and `avatars/<userId>/<file>` (public bucket; only the owner may write; the public URL is saved via `PUT /api/profile` `photoUrl`, or `PUT /api/profile/photo` at signup). No client ever writes a database row.
 
 ## Reads that bypass the server
 

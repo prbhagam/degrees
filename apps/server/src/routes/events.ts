@@ -32,7 +32,7 @@ const MAX_CODE_ATTEMPTS = 5;
 interface MockEvent {
   eventId: string;
   groupId: string;
-  name: string;
+  name: string | null;
   scheduledAt: string | null;
   codeExpiresAt: string;
   attendeeIds: string[];
@@ -71,7 +71,7 @@ export const eventRoutes = new Hono<AppEnv>()
       mockHostedEvents.set(roomCode, {
         eventId,
         groupId: DEMO_GROUP_ID,
-        name: request.name,
+        name: request.name || null,
         scheduledAt: request.scheduledAt ?? null,
         codeExpiresAt: codeExpiry(request.scheduledAt),
         attendeeIds: [userId],
@@ -86,7 +86,8 @@ export const eventRoutes = new Hono<AppEnv>()
       .from('groups')
       .insert({
         kind: 'meetup',
-        name: request.name,
+        // Wave 6: unnamed until someone renames it; the app titles it by who's in it.
+        name: request.name || null,
         created_by: userId,
         scheduled_at: request.scheduledAt ?? null,
         status: 'confirmed',
@@ -107,12 +108,12 @@ export const eventRoutes = new Hono<AppEnv>()
         .from('events')
         .insert({
           room_code: roomCode,
-          name: request.name,
+          name: request.name || null,
           description: request.description ?? null,
           scheduled_at: request.scheduledAt ?? null,
           city: request.city ?? null,
-          group_size_min: request.groupSizeMin,
-          group_size_max: request.groupSizeMax,
+          group_size_min: request.groupSizeMin ?? null,
+          group_size_max: request.groupSizeMax ?? null,
           created_by: userId,
           group_id: groupId,
           code_expires_at: codeExpiry(request.scheduledAt),
@@ -172,7 +173,7 @@ export const eventRoutes = new Hono<AppEnv>()
       const response: JoinEventResponse = {
         eventId: hosted.eventId,
         groupId: hosted.groupId,
-        name: hosted.name,
+        name: hosted.name ?? `Meetup ${roomCode}`,
         hostId: REQUESTER_ID,
         scheduledAt: hosted.scheduledAt,
         codeExpiresAt: hosted.codeExpiresAt,
@@ -257,7 +258,7 @@ export const eventRoutes = new Hono<AppEnv>()
     const response = {
       eventId: event.id,
       groupId,
-      name: event.name ?? roomCode,
+      name: event.name ?? `Meetup ${roomCode}`,
       hostId: event.created_by,
       scheduledAt: event.scheduled_at ? new Date(event.scheduled_at).toISOString() : null,
       codeExpiresAt: isCodeOpen(event) && event.code_expires_at ? new Date(event.code_expires_at).toISOString() : null,
