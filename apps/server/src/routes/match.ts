@@ -1,4 +1,5 @@
 // Owner: Christian (Server & Infra) — see docs/ROLES.md. Real-mode pipeline wired by Sahith (matching/).
+// CHANGED Sep 26 (wave 5, Sahith): everyone put in the new group is notified (hangout_invited).
 import { Hono } from 'hono';
 import {
   frequencySchema,
@@ -11,6 +12,7 @@ import { ApiError } from '../lib/errors.js';
 import { profileBasics } from '../lib/graph.js';
 import { redactReasoning } from '../lib/groups.js';
 import { log, timed } from '../lib/log.js';
+import { notify } from '../lib/notify.js';
 import { firstMissingStep, loadProfileStatus } from '../lib/profileStatus.js';
 import { formGroups } from '../matching/formGroups.js';
 import { narrow } from '../matching/narrow.js';
@@ -214,6 +216,13 @@ export const matchRoutes = new Hono<AppEnv>().post(
       queryFailed('group creation', createError);
     }
     log.info('match.group_created', { userId, groupId, members: group.memberIds.length });
+    // wave 5: the others find out they're in a proposed group. No names in the payload — a recipient may not
+    // have met the requester (redaction rule); the group screen shows what they may see.
+    await notify(
+      others.map((c) => c.id),
+      'hangout_invited',
+      { groupId, memberCount: others.length + 1 },
+    );
 
     const mine = new Set(requesterInterests.map((l) => l.toLowerCase()));
     const sharedWith = (interests: string[]) =>

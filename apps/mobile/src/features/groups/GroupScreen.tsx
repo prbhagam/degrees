@@ -8,6 +8,8 @@
 // until everyone has said yes: you see Accept / Decline until you've answered, then "waiting on N" with a tick per
 // person who's in. Chat and the plan open once it's confirmed. Any member can rename the group. "Why this group"
 // never names anyone you haven't met (server-side redaction).
+// CHANGED Sep 26 (wave 5, Sahith): the title comes from hangoutTitle() (shared with chat + Chats tab); the plan
+// card shows the locked-in time (TimesCard on the plan screen), for matched groups as well as meetups.
 import type { Activity, GroupMember } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
 import { Stack, useLocalSearchParams, useRouter, type Href } from 'expo-router';
@@ -35,7 +37,7 @@ import { joinLink } from '@/features/events/links';
 import { api } from '@/lib/api';
 import { usePullToRefresh } from '@/lib/query';
 import { useSessionStore } from '@/stores/session';
-import { firstName, memberDegreeLabel, memberDisplayName } from './degrees';
+import { hangoutTitle, memberDegreeLabel, memberDisplayName } from './degrees';
 import { queryKeys, useGroup } from './queries';
 import {
   Avatar,
@@ -143,13 +145,19 @@ function ActivityPreview({
   activity,
   activityStatus,
   historyCount,
+  scheduledAt,
   onPress,
 }: {
   activity: Activity | null;
   activityStatus?: string | null;
   historyCount: number;
+  // Wave 5: the time the group locked in on the plan screen, if any.
+  scheduledAt: string | null;
   onPress: () => void;
 }) {
+  const whenLine = scheduledAt
+    ? `When: ${format(parseISO(scheduledAt), 'EEE, MMM d · h:mm a')}`
+    : 'No time yet — propose one';
   const isGenerating =
     activity?.status === 'generating' || activityStatus === 'generating';
 
@@ -188,6 +196,7 @@ function ActivityPreview({
       <Card>
         <Heading>The plan</Heading>
         <Body>Nothing planned yet. Let Degrees find a real place that fits everyone.</Body>
+        <Muted>{whenLine}</Muted>
         <Button label="Plan something" onPress={onPress} />
       </Card>
     );
@@ -209,6 +218,7 @@ function ActivityPreview({
           </View>
           <ChevronRight size={20} color="#8A8378" />
         </View>
+        <Muted>{whenLine}</Muted>
         {historyCount > 0 ? (
           <Muted>
             {historyCount} earlier {historyCount === 1 ? 'plan' : 'plans'} kept — open to compare or bring one back.
@@ -370,16 +380,8 @@ export function GroupScreen() {
   };
 
   const others = data?.members.filter((member) => member.degree !== 0) ?? [];
-  const revealedOthers = others.filter((member) => member.revealed);
-  const title = data?.name
-    ? data.name
-    : revealedOthers.length > 0
-      ? `You + ${revealedOthers.map((m) => firstName(m.displayName ?? 'Someone')).join(', ')}${
-          data && data.unrevealedCount > 0 ? ` + ${data.unrevealedCount} more` : ''
-        }`
-      : data && data.unrevealedCount > 0
-        ? `You + ${data.unrevealedCount} new people`
-        : 'Your group';
+  // Wave 5: one title everywhere (group screen, chat header, Chats tab) — see degrees.ts.
+  const title = hangoutTitle(data ?? null);
   const waitingOn = data ? data.members.length - data.acceptedCount : 0;
   const everyoneElsePassed = isProposed && others.length === 0;
 
@@ -411,7 +413,7 @@ export function GroupScreen() {
               ) : null}
             </View>
             {rename.isError ? <Muted>{rename.error.message}</Muted> : null}
-            {isMeetup && data.scheduledAt ? (
+            {data.scheduledAt ? (
               <Muted>{format(parseISO(data.scheduledAt), 'EEEE, MMM d · h:mm a')}</Muted>
             ) : null}
             {isCompleted ? <Muted>{isMeetup ? 'Ended' : 'Wrapped up'} — chat and photos close 24h after.</Muted> : null}
@@ -557,6 +559,7 @@ export function GroupScreen() {
                 activity={data.activity}
                 activityStatus={data.activityStatus}
                 historyCount={data.activityHistory.length}
+                scheduledAt={data.scheduledAt}
                 onPress={() => router.push(`/groups/${id}/activity`)}
               />
 

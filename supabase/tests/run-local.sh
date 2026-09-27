@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Owner: Sahith (Data & Matching) — applies 0001 + 0003-0011 to a throwaway local Postgres and runs matching.sql + privacy.sql,
+# Owner: Sahith (Data & Matching) — applies 0001 + 0003-0012 to a throwaway local Postgres and runs matching.sql + privacy.sql,
 # then, on a second fresh database, demo_accounts.sql (supabase/scripts/restore + purge_demo_users.sql).
 # Never touches the shared Supabase project. Requires Homebrew postgresql + pgvector.
 set -euo pipefail
@@ -93,6 +93,7 @@ psql_run -f "$migrations/0008_activity_status_and_realtime.sql"
 psql_run -f "$migrations/0009_activity_jobs.sql"
 psql_run -f "$migrations/0010_plan_history_realtime_contacts.sql"
 psql_run -f "$migrations/0011_member_acceptance.sql"
+psql_run -f "$migrations/0012_times_notification_settings.sql"
 }
 
 setup_db degrees

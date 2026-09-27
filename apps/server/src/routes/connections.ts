@@ -1,4 +1,6 @@
 // Owner: Pranav (Groups, Activities & Chat) — edge creation + graph; Christian owns the server framework.
+// CHANGED Sep 26 (wave 5, Sahith): a new edge tells the other person ("X put 'We met'"), and a contact-exchange
+// tap tells the peer it was requested / accepted (lib/notify.ts).
 import { Hono } from 'hono';
 import {
   contactExchangeRequestSchema,
@@ -11,7 +13,8 @@ import {
 import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError, validateJson } from '../lib/errors.js';
-import { exploreFrom, profileBasics } from '../lib/graph.js';
+import { displayNames, exploreFrom, profileBasics } from '../lib/graph.js';
+import { notify } from '../lib/notify.js';
 import type { AppEnv } from '../middleware/auth.js';
 import { graphFixture } from '../mocks/fixtures.js';
 
@@ -53,6 +56,13 @@ export const connectionRoutes = new Hono<AppEnv>()
       const edgeKey = `${userA}:${userB}`;
       const edgeCreated = !mockEdges.has(edgeKey);
       mockEdges.add(edgeKey);
+      if (edgeCreated) {
+        await notify([request.peerId], 'connection_added', {
+          peerId: userId,
+          peerName: 'Avery Chen',
+          eventId: request.eventId ?? null,
+        });
+      }
       const response = {
         ok: true,
         edgeCreated,
@@ -95,6 +105,16 @@ export const connectionRoutes = new Hono<AppEnv>()
         throw new ApiError(404, 'event_not_found', 'No event has that id.');
       }
       throw new Error(`connections insert failed: ${error.message}`);
+    }
+    if (inserted.length > 0) {
+      // The tapper is 1st degree to the peer now, so naming them is fine.
+      const callerName = (await displayNames([userId])).get(userId) ?? 'Someone';
+      await notify([request.peerId], 'connection_added', {
+        peerId: userId,
+        peerName: callerName,
+        eventId: request.eventId ?? null,
+        context: request.context,
+      });
     }
     const response = {
       ok: true,
@@ -194,10 +214,17 @@ export const connectionRoutes = new Hono<AppEnv>()
       }
       const key = `${userA}:${userB}`;
       const state = mockContacts.get(key) ?? { a: userA, b: userB, aAccepted: false, bAccepted: false };
+      const wasAccepted = viewerId === userA ? state.aAccepted : state.bAccepted;
       if (viewerId === userA) state.aAccepted = true;
       else state.bAccepted = true;
       mockContacts.set(key, state);
       const contact = mockContactState(viewerId, peerId);
+      if (!wasAccepted) {
+        await notify([peerId], contact.peerAccepted ? 'exchange_accepted' : 'exchange_requested', {
+          peerId: viewerId,
+          peerName: 'Avery Chen',
+        });
+      }
       const response = {
         requesterAccepted: contact.requested,
         peerAccepted: contact.peerAccepted,
@@ -243,6 +270,12 @@ export const connectionRoutes = new Hono<AppEnv>()
       throw new Error(`connection_contacts write failed: ${writeError.message}`);
     }
     const both = next.a_accepted && next.b_accepted;
+    // wave 5: tell the peer — once, on the tap that flipped the caller's side; a re-tap stays silent.
+    const wasAccepted = Boolean(viewerId === userA ? existing?.a_accepted : existing?.b_accepted);
+    if (!wasAccepted) {
+      const callerName = (await displayNames([viewerId])).get(viewerId) ?? 'Someone';
+      await notify([peerId], both ? 'exchange_accepted' : 'exchange_requested', { peerId: viewerId, peerName: callerName });
+    }
     let peerPhone: string | null = null;
     if (both) {
       const { data: peerProfile } = await db.from('profiles').select('phone').eq('id', peerId).maybeSingle();

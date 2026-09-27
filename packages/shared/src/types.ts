@@ -9,8 +9,12 @@ import type {
   feedbackRequestSchema,
   generateIcebreakersOutputSchema,
   hangoutKindSchema,
+  notificationSettingsSchema,
   notificationTypeSchema,
+  proposeTimeRequestSchema,
   respondRequestSchema,
+  timeVoteRequestSchema,
+  updateNotificationSettingsRequestSchema,
   addPhotoRequestSchema,
   contactExchangeRequestSchema,
   renameGroupRequestSchema,
@@ -31,6 +35,11 @@ export type ActivitySource = 'maps' | 'ticketmaster';
 export type Sentiment = 'positive' | 'neutral' | 'negative';
 export type FeedbackRelationship = 'great' | 'fine' | 'not_for_me';
 export type NotificationType = z.infer<typeof notificationTypeSchema>;
+// Added Sep 26 (wave 5): per-kind notification toggles (see schemas.ts NOTIFICATION_SETTING_FOR).
+export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
+export type UpdateNotificationSettingsRequest = z.infer<typeof updateNotificationSettingsRequestSchema>;
+export type ProposeTimeRequest = z.infer<typeof proposeTimeRequestSchema>;
+export type TimeVoteRequest = z.infer<typeof timeVoteRequestSchema>;
 // Added Sep 26 (wave 2): a group is matched (auto-generated, non-joinable) or a meetup (joinable by room code /
 // QR, people who actually met in person). Same container either way — see docs/DATA-MODEL.md.
 export type HangoutKind = z.infer<typeof hangoutKindSchema>;
@@ -57,6 +66,8 @@ export interface MeResponse {
   profileStatus: ProfileStatus;
   // Added Sep 26 (wave 2): saved preferences, so the preferences screen prefills. Null until first saved.
   preferences: UpdatePreferencesRequest | null;
+  // Added Sep 26 (wave 5): which notifications this person wants. Defaults are all on.
+  notificationSettings: NotificationSettings;
 }
 
 export interface ProfileStatus {
@@ -227,6 +238,27 @@ export interface GroupResponse {
   // has accepted; `myResponse` drives Accept/Decline vs "waiting on N others" in the app.
   myResponse: MemberResponse;
   acceptedCount: number;
+  // Added Sep 26 (wave 5): proposed times for the plan (soonest first). `chosen` is the one locked in, which is
+  // also `scheduledAt`. Members propose with POST /groups/:id/times and answer with /times/:timeId/vote.
+  times: TimeSlot[];
+}
+
+// Added Sep 26 (wave 5): a time someone proposed for the group's plan, and who's free for it.
+export interface TimeSlot {
+  id: string;
+  startsAt: string;
+  note: string | null;
+  proposedById: string;
+  proposedByName: string;
+  // Everyone who said they're free (first names are fine to show: chat is open by the time times are discussed).
+  availableIds: string[];
+  availableNames: string[];
+  imAvailable: boolean;
+  chosen: boolean;
+}
+
+export interface TimesResponse {
+  times: TimeSlot[];
 }
 
 // Added Sep 26 (wave 2): GET /api/hangouts — every group the viewer is in, matched and meetup alike, for one home
@@ -248,6 +280,10 @@ export interface HangoutSummary {
   // Added Sep 26 (wave 4): the viewer still has to accept or decline this proposed group.
   needsResponse: boolean;
   acceptedCount: number;
+  // Added Sep 26 (wave 5): the newest chat message, for the Chats tab. Null when nobody has written yet.
+  lastMessage: { body: string; senderName: string; createdAt: string } | null;
+  // Added Sep 26 (wave 5): whether chat is open for the viewer (a meetup, or a matched group that's confirmed).
+  chatOpen: boolean;
 }
 
 export interface HangoutsResponse {
@@ -335,6 +371,11 @@ export interface Notification {
 
 export interface NotificationsResponse {
   notifications: Notification[];
+}
+
+// Added Sep 26 (wave 5): GET/PUT /api/notifications/settings.
+export interface NotificationSettingsResponse {
+  settings: NotificationSettings;
 }
 
 // CONTRACT GAP: assumed candidate prefs are the complete documented preferences request shape; confirm at H0.

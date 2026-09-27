@@ -27,10 +27,14 @@ migrations/0010_plan_history_realtime_contacts.sql  wave 3 (Sahith): activities.
 migrations/0011_member_acceptance.sql    wave 4 (Sahith): group_members.accepted_at (per-member accept; backfilled for meetups,
                                          confirmed/completed groups, and requesters), match_create_group redefined to create the
                                          requester already accepted. Idempotent..
+migrations/0012_times_notification_settings.sql  wave 5 (Sahith): profiles.notification_settings (per-kind toggles read by the
+                                         server's notify()), group_times + group_time_votes (proposed times for a plan; member-readable,
+                                         in the Realtime publication, FULL replica identity), notifications (user_id, created_at) index.
+                                         Idempotent.
 scripts/purge_demo_users.sql             removes every @degrees.demo account and its data: a real environment on demand
 scripts/restore_demo_users.sql           brings the 60 seeded demo accounts back (0002's 12 on the 0011 schema + 48 more); re-runnable
 seed/seed.ts                             replaces 0002's placeholder vectors with real Gemini embeddings (`npm run seed`)
-tests/run-local.sh + matching.sql + privacy.sql   0001 + 0003–0011 on a throwaway local Postgres (with a storage shim) and assertions
+tests/run-local.sh + matching.sql + privacy.sql   0001 + 0003–0012 on a throwaway local Postgres (with a storage shim) and assertions
 tests/demo_accounts.sql                  restore → purge → restore on a second fresh database, with real accounts mixed in
 tsconfig.json                            lets `npm run typecheck` cover seed.ts
 ```
@@ -42,7 +46,7 @@ tsconfig.json                            lets `npm run typecheck` cover seed.ts
 - **RLS is on for every table.** Only `authenticated` gets `SELECT`, and only on the tables the app reads directly: profiles, profile_tags, preferences, groups, group_members, activities, messages. Nothing grants insert, update, or delete, so **every write goes through the API server's service-role key**.
 - Policies: you can read your own profile, tags, and preferences. Group rows, members, activities, and messages are readable only for groups you're in, via `public.is_group_member(gid)`. That helper is `security definer` with an empty `search_path` and fully qualified names; keep it that way. Another user's profile row is readable only if you share a group.
 - RLS works per row, so a shared group exposes a groupmate's profile row. `bio` being visible then is intended (you're matched). `lat`/`lng` are not: 0005 revokes table-level `SELECT` on `profiles` and grants every column except `lat`/`lng` to `authenticated`. Client code must name columns — `select('*')` on `profiles` fails for signed-in users. The server reads location with the service role.
-- `messages` and `notifications` are in the `supabase_realtime` publication (chat and the notification feed). A subscriber must present its JWT (`realtime.setAuth`) or RLS evaluates as `anon` and nothing is delivered — verified Sep 26.
+- `messages` and `notifications` are in the `supabase_realtime` publication (chat and the notification feed); wave 5 adds `group_times` + `group_time_votes` (the plan's proposed times). A subscriber must present its JWT (`realtime.setAuth`) or RLS evaluates as `anon` and nothing is delivered — verified Sep 26.
 - **Storage (0007):** `event-photos` is private; `storage.objects` policies allow `authenticated` insert/select only under a folder named for a group they belong to. `avatars` is public; only the owner may write under their own folder. The server signs `event-photos` read URLs; nobody but the service role lists buckets.
 - 0006 tables: `notifications` is readable only by its owner; `event_photos` only by group members; **`contact_exchanges` has zero client grants** — the server computes whether both sides accepted and only then returns a phone number.
 - **New `profiles` columns are not client-readable.** 0005 replaced table-level `SELECT` with a column list, so `phone`, `pronouns`, and `photo_url` (0006) aren't in it. Keep it that way for `phone`; the app gets `photoUrl` and `pronouns` through the API. Grant a column only if the app must read it directly, and never `phone`.
@@ -56,7 +60,7 @@ tsconfig.json                            lets `npm run typecheck` cover seed.ts
 
 ## Changing the schema
 
-Add a **new** numbered migration (next is `0012_…sql`). Never edit `0001` once it has been applied to the shared project. If a column change affects an API shape, update `packages/shared` and `docs/API-CONTRACTS.md` in the same PR.
+Add a **new** numbered migration (next is `0013_…sql`). Never edit `0001` once it has been applied to the shared project. If a column change affects an API shape, update `packages/shared` and `docs/API-CONTRACTS.md` in the same PR.
 
 To test locally without the Supabase CLI, apply the migration to a throwaway Postgres with a small shim: an `auth` schema, `auth.users`, `auth.uid()`, the `anon` and `authenticated` roles, and a `supabase_realtime` publication. pgvector isn't installed via Homebrew by default, so stub the vector column or install the extension.
 
@@ -64,7 +68,7 @@ To test locally without the Supabase CLI, apply the migration to a throwaway Pos
 
 1. Applied on the shared project: `0002`–`0006` (Sep 26; `0006` went live together with PR #14's server, since each breaks the other's predecessor). Verified live: 0006's columns and tables exist, and the 24 seeded feedback rows became `great`.
    **`0007`–`0009` are applied** (verified Sep 26 ~23:50 UTC: `events.group_id`, `activities.status`, `activities.job` all exist on the shared project).
-   **`0010` (wave 3) and `0011` (wave 4) are NOT applied yet.** Apply both, in order, before the wave-3/4 server deploys: the group read orders `activities` by `created_at` and selects `group_members.accepted_at`, the graph route reads `connection_contacts`, and the app subscribes to `group_members`/`groups` changes.
+   **`0010` (wave 3), `0011` (wave 4), and `0012` (wave 5) are NOT applied yet.** Apply all three, in order, before the wave-3/4/5 server deploys: the group read orders `activities` by `created_at`, selects `group_members.accepted_at`, and reads `group_times`; `GET /api/me` selects `profiles.notification_settings`; the graph route reads `connection_contacts`; and the app subscribes to `group_members`/`groups`/`group_times` changes.
 2. `npm run seed` — re-embeds every profile with Gemini (`gemini-embedding-001`, 768 dims, `SEMANTIC_SIMILARITY`).
    Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY` in the root `.env`. Safe to rerun.
 

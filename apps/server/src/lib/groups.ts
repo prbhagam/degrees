@@ -1,4 +1,8 @@
 // Owner: Pranav (Groups, Activities & Chat) — reads a group as its viewer sees it; used by groups + messages routes.
+// CHANGED Sep 26 (wave 5, Sahith): proposed times for the plan (group_times / group_time_votes → GroupResponse.times,
+// proposeTime / voteTime / chooseTime / removeTime); notifications on confirm and rename (lib/notify.ts);
+// "Use this plan" no longer duplicates — restoreActivity moves the row to the top instead of copying it, and
+// activityHistory is de-duplicated by venue + title.
 import {
   activitySchema,
   type Activity,
@@ -9,6 +13,7 @@ import {
   type GroupResponse,
   type GroupStatus,
   type HangoutKind,
+  type TimeSlot,
 } from '@degrees/shared';
 import {
   activityJobSchema,
@@ -17,8 +22,9 @@ import {
 } from '../ai/generateActivity.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from './errors.js';
-import { exploreFrom, profileBasics } from './graph.js';
+import { displayNames, exploreFrom, profileBasics } from './graph.js';
 import { log } from './log.js';
+import { notify } from './notify.js';
 
 // Added Sep 26 (wave 2): a meetup's room-code record (the `events` row behind a kind='meetup' group).
 export interface MeetupRow {
@@ -290,7 +296,7 @@ export async function loadGroup(
   const ids = rows.map((row) => row.user_id);
   const db = getServiceClient();
 
-  const [groupResult, activityResult, basics, tags, { reach }, meetup, icebreakers] =
+  const [groupResult, activityResult, basics, tags, { reach }, meetup, icebreakers, times] =
     await Promise.all([
       db
         .from('groups')
@@ -304,6 +310,7 @@ export async function loadGroup(
       exploreFrom(viewerId, undefined, ids),
       meetupForGroup(groupId),
       listIcebreakers(groupId),
+      listTimes(groupId, viewerId),
     ]);
   if (groupResult.error) {
     throw new Error(`groups read failed: ${groupResult.error.message}`);
@@ -372,6 +379,8 @@ export async function loadGroup(
   const myResponse = viewerRow?.accepted_at ? 'accepted' : 'pending';
   const acceptedCount = rows.filter((row) => row.accepted_at !== null).length;
 
+  const scheduledRaw = (groupResult.data.scheduled_at as string | null) ?? meetup?.scheduled_at ?? null;
+  const scheduledMs = scheduledRaw ? new Date(scheduledRaw).getTime() : null;
   const activityRows = activityResult.data as ActivityRow[];
   const activityRow = activityRows[0];
   const codeOpen = meetup ? isCodeOpen(meetup) : false;
@@ -379,13 +388,16 @@ export async function loadGroup(
   // background function works; the client polls/subscribes until it flips to 'ready'.
   const activityStatus = (activityRow?.status as ActivityStatus | null) ?? (activityRow ? 'ready' : null);
   const activity = activityRow ? toActivity(activityRow) : null;
-  const activityHistory = activityRows
-    .slice(1)
-    .filter((row) => (row.status ?? 'ready') === 'ready')
-    .flatMap((row) => {
-      const parsed = toActivity(row);
-      return parsed ? [parsed] : [];
-    });
+  const activityHistory = dedupePlans(
+    activityRows
+      .slice(1)
+      .filter((row) => (row.status ?? 'ready') === 'ready')
+      .flatMap((row) => {
+        const parsed = toActivity(row);
+        return parsed ? [parsed] : [];
+      }),
+    activity,
+  );
   return {
     id: groupResult.data.id as string,
     status,
@@ -400,13 +412,32 @@ export async function loadGroup(
     name: (groupResult.data.name as string | null) ?? meetup?.name ?? null,
     eventId: meetup?.id ?? null,
     hostId: (groupResult.data.created_by as string | null) ?? meetup?.created_by ?? null,
-    scheduledAt: iso((groupResult.data.scheduled_at as string | null) ?? meetup?.scheduled_at),
+    scheduledAt: iso(scheduledRaw),
     roomCode: meetup && codeOpen ? meetup.room_code : null,
     codeExpiresAt: meetup && codeOpen ? iso(meetup.code_expires_at) : null,
     icebreakers,
     myResponse,
     acceptedCount,
+    times: times.map((slot) => ({
+      ...slot,
+      chosen: scheduledMs !== null && new Date(slot.startsAt).getTime() === scheduledMs,
+    })),
   };
+}
+
+// wave 5: the same plan restored twice used to appear twice under "Earlier plans". History is keyed on venue +
+// title (newest wins, which is the order the rows arrive in) and never repeats the current plan.
+const planKey = (plan: Pick<Activity, 'venue' | 'title'>) =>
+  `${plan.venue}::${plan.title}`.toLowerCase().replace(/[^a-z0-9:]+/g, ' ').trim();
+export function dedupePlans(history: Activity[], current: Activity | null): Activity[] {
+  const seen = new Set<string>();
+  if (current && current.status !== 'generating') seen.add(planKey(current));
+  return history.filter((plan) => {
+    const key = planKey(plan);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 // Added Sep 26 (wave 4): one person's answer to a proposed group. Accepting records only the caller's acceptance;
@@ -441,26 +472,35 @@ export async function respondToGroup(groupId: string, userId: string, accept: bo
 
 async function confirmIfEveryoneAccepted(groupId: string): Promise<void> {
   const db = getServiceClient();
-  const { data, error } = await db.from('group_members').select('accepted_at').eq('group_id', groupId);
+  const { data, error } = await db.from('group_members').select('user_id, accepted_at').eq('group_id', groupId);
   if (error) {
     throw new Error(`group_members read failed: ${error.message}`);
   }
   // A group of one is nobody's hangout: leave it proposed so the app can say everyone else passed.
   if (data.length < 2 || data.some((row) => row.accepted_at === null)) return;
-  const { error: updateError } = await db
+  const { data: confirmed, error: updateError } = await db
     .from('groups')
     .update({ status: 'confirmed' })
     .eq('id', groupId)
-    .eq('status', 'proposed');
+    .eq('status', 'proposed')
+    .select('id, name');
   if (updateError) {
     throw new Error(`groups update failed: ${updateError.message}`);
+  }
+  // wave 5: only the call that actually flipped the row tells everyone the group is on.
+  if (confirmed && confirmed.length > 0) {
+    await notify(
+      (data as { user_id?: string }[]).map((row) => row.user_id as string),
+      'hangout_forming',
+      { groupId, name: (confirmed[0]?.name as string | null) ?? null, memberCount: data.length },
+    );
   }
 }
 
 // Added Sep 26 (wave 4): any member can rename a group or meetup. A meetup's `events` row keeps the same name so
 // the join lobby and QR-formed connections' "met at" agree.
 export async function renameGroup(groupId: string, userId: string, name: string): Promise<void> {
-  await memberRows(groupId, userId);
+  const members = await memberRows(groupId, userId);
   const db = getServiceClient();
   const { error } = await db.from('groups').update({ name }).eq('id', groupId);
   if (error) {
@@ -470,6 +510,212 @@ export async function renameGroup(groupId: string, userId: string, name: string)
   if (eventError) {
     throw new Error(`events update failed: ${eventError.message}`);
   }
+  // wave 5: everyone else hears about the new name.
+  await notify(
+    members.map((row) => row.user_id),
+    'event_changed',
+    { groupId, name, change: 'renamed', detail: name },
+    { exclude: userId },
+  );
+}
+
+// ---- Times for the plan (Added Sep 26, wave 5) ---------------------------------------------------
+// The calendar moved off "Host a meetup" (you're already with those people) onto the plan: members propose
+// times, say which they're free for, and any member locks one in (groups.scheduled_at).
+interface TimeRow {
+  id: string;
+  group_id: string;
+  proposed_by: string | null;
+  starts_at: string;
+  note: string | null;
+}
+
+export async function listTimes(groupId: string, viewerId: string): Promise<TimeSlot[]> {
+  const db = getServiceClient();
+  const [times, votes] = await Promise.all([
+    db.from('group_times').select('id, group_id, proposed_by, starts_at, note').eq('group_id', groupId).order('starts_at', { ascending: true }),
+    db.from('group_time_votes').select('time_id, user_id').eq('group_id', groupId),
+  ]);
+  if (times.error) {
+    throw new Error(`group_times read failed: ${times.error.message}`);
+  }
+  if (votes.error) {
+    throw new Error(`group_time_votes read failed: ${votes.error.message}`);
+  }
+  const rows = times.data as TimeRow[];
+  const votesByTime = new Map<string, string[]>();
+  for (const vote of votes.data) {
+    const id = vote.time_id as string;
+    votesByTime.set(id, [...(votesByTime.get(id) ?? []), vote.user_id as string]);
+  }
+  const names = await displayNames([
+    ...rows.flatMap((row) => (row.proposed_by ? [row.proposed_by] : [])),
+    ...[...votesByTime.values()].flat(),
+  ]);
+  return rows.map((row) => {
+    const availableIds = votesByTime.get(row.id) ?? [];
+    return {
+      id: row.id,
+      startsAt: new Date(row.starts_at).toISOString(),
+      note: row.note ?? null,
+      proposedById: row.proposed_by ?? '',
+      proposedByName: (row.proposed_by && names.get(row.proposed_by)) || 'Someone',
+      availableIds,
+      availableNames: availableIds.map((id) => names.get(id) ?? 'Someone'),
+      imAvailable: availableIds.includes(viewerId),
+      // Filled in by the caller, which knows groups.scheduled_at.
+      chosen: false,
+    };
+  });
+}
+
+// listTimes with `chosen` resolved against the group's scheduled time — what every times route returns.
+export async function timesResponse(groupId: string, viewerId: string): Promise<TimeSlot[]> {
+  const [times, group] = await Promise.all([
+    listTimes(groupId, viewerId),
+    getServiceClient().from('groups').select('scheduled_at').eq('id', groupId).single(),
+  ]);
+  if (group.error) {
+    throw new Error(`groups read failed: ${group.error.message}`);
+  }
+  const scheduledMs = group.data.scheduled_at ? new Date(group.data.scheduled_at as string).getTime() : null;
+  return times.map((slot) => ({
+    ...slot,
+    chosen: scheduledMs !== null && new Date(slot.startsAt).getTime() === scheduledMs,
+  }));
+}
+
+// Idempotent on (group, minute): proposing the same time twice returns the existing slot. The proposer is free
+// for their own suggestion.
+export async function proposeTime(groupId: string, userId: string, startsAt: string, note?: string): Promise<TimeSlot[]> {
+  await memberRows(groupId, userId);
+  await assertNotArchived(groupId);
+  const db = getServiceClient();
+  const at = new Date(startsAt);
+  at.setSeconds(0, 0);
+  const { data: existing, error: readError } = await db
+    .from('group_times')
+    .select('id')
+    .eq('group_id', groupId)
+    .eq('starts_at', at.toISOString())
+    .maybeSingle();
+  if (readError) {
+    throw new Error(`group_times read failed: ${readError.message}`);
+  }
+  let timeId = existing?.id as string | undefined;
+  if (!timeId) {
+    const { data, error } = await db
+      .from('group_times')
+      .insert({ group_id: groupId, proposed_by: userId, starts_at: at.toISOString(), note: note?.trim() || null })
+      .select('id')
+      .single();
+    if (error || !data) {
+      throw new Error(`group_times insert failed: ${error?.message ?? 'no row'}`);
+    }
+    timeId = data.id as string;
+  }
+  const { error: voteError } = await db
+    .from('group_time_votes')
+    .upsert({ time_id: timeId, group_id: groupId, user_id: userId }, { onConflict: 'time_id,user_id', ignoreDuplicates: true });
+  if (voteError) {
+    throw new Error(`group_time_votes insert failed: ${voteError.message}`);
+  }
+  return timesResponse(groupId, userId);
+}
+
+async function timeRow(groupId: string, timeId: string): Promise<TimeRow> {
+  const { data, error } = await getServiceClient()
+    .from('group_times')
+    .select('id, group_id, proposed_by, starts_at, note')
+    .eq('group_id', groupId)
+    .eq('id', timeId)
+    .maybeSingle();
+  if (error) {
+    throw new Error(`group_times read failed: ${error.message}`);
+  }
+  if (!data) {
+    throw new ApiError(404, 'time_not_found', 'That time is no longer proposed.');
+  }
+  return data as TimeRow;
+}
+
+export async function voteTime(groupId: string, userId: string, timeId: string, available: boolean): Promise<TimeSlot[]> {
+  await memberRows(groupId, userId);
+  await assertNotArchived(groupId);
+  await timeRow(groupId, timeId);
+  const db = getServiceClient();
+  if (available) {
+    const { error } = await db
+      .from('group_time_votes')
+      .upsert({ time_id: timeId, group_id: groupId, user_id: userId }, { onConflict: 'time_id,user_id', ignoreDuplicates: true });
+    if (error) {
+      throw new Error(`group_time_votes insert failed: ${error.message}`);
+    }
+  } else {
+    const { error } = await db.from('group_time_votes').delete().eq('time_id', timeId).eq('user_id', userId);
+    if (error) {
+      throw new Error(`group_time_votes delete failed: ${error.message}`);
+    }
+  }
+  return timesResponse(groupId, userId);
+}
+
+// Any member locks a time in; it becomes the group's (and the meetup's) scheduled time and everyone else hears.
+export async function chooseTime(groupId: string, userId: string, timeId: string): Promise<TimeSlot[]> {
+  const members = await memberRows(groupId, userId);
+  await assertNotArchived(groupId);
+  const row = await timeRow(groupId, timeId);
+  const db = getServiceClient();
+  const startsAt = new Date(row.starts_at).toISOString();
+  const { data: group, error } = await db
+    .from('groups')
+    .update({ scheduled_at: startsAt })
+    .eq('id', groupId)
+    .select('name')
+    .single();
+  if (error) {
+    throw new Error(`groups update failed: ${error.message}`);
+  }
+  const { error: eventError } = await db.from('events').update({ scheduled_at: startsAt }).eq('group_id', groupId);
+  if (eventError) {
+    throw new Error(`events update failed: ${eventError.message}`);
+  }
+  await notify(
+    members.map((member) => member.user_id),
+    'event_changed',
+    { groupId, name: (group?.name as string | null) ?? null, change: 'time', detail: startsAt },
+    { exclude: userId },
+  );
+  return timesResponse(groupId, userId);
+}
+
+// Only the proposer can withdraw a time. If it was the locked-in one, the group is unscheduled again.
+export async function removeTime(groupId: string, userId: string, timeId: string): Promise<TimeSlot[]> {
+  await memberRows(groupId, userId);
+  await assertNotArchived(groupId);
+  const row = await timeRow(groupId, timeId);
+  if (row.proposed_by !== userId) {
+    throw new ApiError(403, 'not_proposer', 'Only whoever proposed a time can remove it.');
+  }
+  const db = getServiceClient();
+  const { error: voteError } = await db.from('group_time_votes').delete().eq('time_id', timeId);
+  if (voteError) {
+    throw new Error(`group_time_votes delete failed: ${voteError.message}`);
+  }
+  const { error } = await db.from('group_times').delete().eq('id', timeId);
+  if (error) {
+    throw new Error(`group_times delete failed: ${error.message}`);
+  }
+  const startsAt = new Date(row.starts_at).toISOString();
+  const { error: unschedule } = await db.from('groups').update({ scheduled_at: null }).eq('id', groupId).eq('scheduled_at', startsAt);
+  if (unschedule) {
+    throw new Error(`groups update failed: ${unschedule.message}`);
+  }
+  const { error: eventUnschedule } = await db.from('events').update({ scheduled_at: null }).eq('group_id', groupId).eq('scheduled_at', startsAt);
+  if (eventUnschedule) {
+    throw new Error(`events update failed: ${eventUnschedule.message}`);
+  }
+  return timesResponse(groupId, userId);
 }
 
 // Added Sep 26 (wave 2): leave any group you're in that hasn't wrapped up. Proposed: same as declining.
@@ -709,13 +955,15 @@ export async function setActivityGenerating(groupId: string, job: ActivityJob = 
   return placeholder;
 }
 
-// Added Sep 26 (wave 3): make an earlier plan the current one again. It's copied as a new row (so the history
-// stays chronological and the copy gets today's timestamp) and any in-flight placeholder is dropped.
+// Added Sep 26 (wave 3): make an earlier plan the current one again.
+// CHANGED Sep 26 (wave 5): the row itself moves to the top (created_at = now) instead of being copied. Copying
+// left the original in history, so every "Use this plan" added a duplicate under "Earlier plans" — switch back
+// and forth a few times and the list filled with the same two plans. Any in-flight placeholder is dropped.
 export async function restoreActivity(groupId: string, activityId: string): Promise<Activity> {
   const db = getServiceClient();
   const { data, error } = await db
     .from('activities')
-    .select('*')
+    .select('id')
     .eq('group_id', groupId)
     .eq('id', activityId)
     .eq('status', 'ready')
@@ -723,12 +971,29 @@ export async function restoreActivity(groupId: string, activityId: string): Prom
   if (error) {
     throw new Error(`activities read failed: ${error.message}`);
   }
-  const previous = data ? toActivity(data as ActivityRow) : null;
-  if (!previous) {
+  if (!data) {
     throw new ApiError(404, 'activity_not_found', 'That plan is no longer available.');
   }
-  const { id: _id, createdAt: _createdAt, ...plan } = previous;
-  await saveActivity(groupId, plan, 'ready', null);
-  const current = await loadActivityJob(groupId);
-  return current?.activity ?? plan;
+  const { error: deleteError } = await db
+    .from('activities')
+    .delete()
+    .eq('group_id', groupId)
+    .in('status', ['generating', 'failed']);
+  if (deleteError) {
+    throw new Error(`activities delete failed: ${deleteError.message}`);
+  }
+  const { data: moved, error: updateError } = await db
+    .from('activities')
+    .update({ created_at: new Date().toISOString(), job: null })
+    .eq('id', activityId)
+    .select('*')
+    .single();
+  if (updateError || !moved) {
+    throw new Error(`activities update failed: ${updateError?.message ?? 'no row'}`);
+  }
+  const restored = toActivity(moved as ActivityRow);
+  if (!restored) {
+    throw new ApiError(404, 'activity_not_found', 'That plan is no longer available.');
+  }
+  return restored;
 }

@@ -18,13 +18,18 @@ import type {
   MatchRunResponse,
   MeResponse,
   MessagesResponse,
+  NotificationSettingsResponse,
   NotificationsResponse,
   OkResponse,
   PhotosResponse,
+  ProposeTimeRequest,
   SendMessageRequest,
   SendMessageResponse,
   SignupRequest,
   SignupResponse,
+  TimesResponse,
+  TimeVoteRequest,
+  UpdateNotificationSettingsRequest,
   UpdatePreferencesRequest,
   UpdateProfileRequest,
 } from '@degrees/shared';
@@ -200,4 +205,18 @@ export const api = {
     request<ExchangeResponse>('/api/graph/exchange', json('POST', { peerId })),
   // Added Sep 26 (wave 4): rename a group or meetup.
   renameGroup: (id: string, name: string) => request<OkResponse>(groupPath(id), json('PUT', { name })),
+  // Added Sep 26 (wave 5): times for the plan — propose, say you're free, lock one in, withdraw yours.
+  proposeTime: (id: string, body: ProposeTimeRequest) =>
+    request<TimesResponse>(`${groupPath(id)}/times`, json('POST', body)),
+  voteTime: (id: string, timeId: string, body: TimeVoteRequest) =>
+    request<TimesResponse>(`${groupPath(id)}/times/${encodeURIComponent(timeId)}/vote`, json('POST', body)),
+  chooseTime: (id: string, timeId: string) =>
+    request<TimesResponse>(`${groupPath(id)}/times/${encodeURIComponent(timeId)}/choose`, { method: 'POST' }),
+  deleteTime: (id: string, timeId: string) =>
+    request<TimesResponse>(`${groupPath(id)}/times/${encodeURIComponent(timeId)}`, { method: 'DELETE' }),
+  // Added Sep 26 (wave 5): the feed is marked read on open; per-kind toggles live on the profile.
+  markNotificationsRead: () => request<OkResponse>('/api/notifications/read', { method: 'POST' }),
+  getNotificationSettings: () => request<NotificationSettingsResponse>('/api/notifications/settings'),
+  updateNotificationSettings: (body: UpdateNotificationSettingsRequest) =>
+    request<NotificationSettingsResponse>('/api/notifications/settings', json('PUT', body)),
 };

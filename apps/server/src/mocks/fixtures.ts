@@ -1,20 +1,22 @@
 // Owner: Christian (Server & Infra) — see docs/ROLES.md.
-import type {
-  Activity,
-  AnalyzeFeedbackOutput,
-  GraphResponse,
-  GroupResponse,
-  HangoutsResponse,
-  IcebreakersResponse,
-  JoinEventResponse,
-  MatchRunResponse,
-  MeResponse,
-  MessagesResponse,
-  Notification,
-  NotificationsResponse,
-  Photo,
-  PhotosResponse,
-  UpdatePreferencesRequest,
+import {
+  DEFAULT_NOTIFICATION_SETTINGS,
+  type Activity,
+  type AnalyzeFeedbackOutput,
+  type GraphResponse,
+  type GroupResponse,
+  type HangoutsResponse,
+  type IcebreakersResponse,
+  type JoinEventResponse,
+  type MatchRunResponse,
+  type MeResponse,
+  type MessagesResponse,
+  type Notification,
+  type NotificationsResponse,
+  type Photo,
+  type PhotosResponse,
+  type TimeSlot,
+  type UpdatePreferencesRequest,
 } from '@degrees/shared';
 
 export const REQUESTER_ID = '10000000-0000-4000-8000-000000000001';
@@ -120,6 +122,8 @@ export const meFixture = {
     groupSizeMax: 6,
     maxDegrees: 2,
   },
+  // wave 5: all kinds on by default.
+  notificationSettings: { ...DEFAULT_NOTIFICATION_SETTINGS },
 } satisfies MeResponse;
 
 export const preferencesFixture = meFixture.preferences satisfies UpdatePreferencesRequest;
@@ -324,7 +328,29 @@ export const groupFixture = {
   icebreakers: [],
   myResponse: 'accepted',
   acceptedCount: 4,
+  // wave 5: one proposed time so the plan screen has something to answer in mock mode (routes/groups.ts keeps
+  // the live list in memory, seeded from this).
+  times: [],
 } satisfies GroupResponse;
+
+// wave 5: the mock group's first proposed time — two days out, Maya and Jordan already free.
+export function timesFixture(now = Date.now()): TimeSlot[] {
+  const startsAt = new Date(now + 2 * 24 * 60 * 60 * 1000);
+  startsAt.setMinutes(0, 0, 0);
+  return [
+    {
+      id: 'mock-time-1',
+      startsAt: startsAt.toISOString(),
+      note: 'After class works for me',
+      proposedById: people[1].id,
+      proposedByName: 'Maya Patel',
+      availableIds: [people[1].id, people[3].id],
+      availableNames: ['Maya Patel', 'Jordan Kim'],
+      imAvailable: false,
+      chosen: false,
+    },
+  ];
+}
 
 // Added Sep 26 (wave 2): the home list — the demo group plus a wrapped-up meetup for the "past" section.
 export const hangoutsFixture = {
@@ -344,6 +370,13 @@ export const hangoutsFixture = {
       isPast: false,
       needsResponse: false,
       acceptedCount: 4,
+      // wave 5: the newest of messagesFixture, for the Chats tab.
+      lastMessage: {
+        body: 'Yes — I will arrive fifteen minutes early.',
+        senderName: 'Maya Patel',
+        createdAt: '2026-09-26T14:14:00.000Z',
+      },
+      chatOpen: true,
     },
     {
       id: DEMO_MEETUP_GROUP_ID,
@@ -360,6 +393,8 @@ export const hangoutsFixture = {
       isPast: true,
       needsResponse: false,
       acceptedCount: 4,
+      lastMessage: null,
+      chatOpen: true,
     },
   ],
 } satisfies HangoutsResponse;

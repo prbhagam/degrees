@@ -3,6 +3,7 @@
 // CHANGED Sep 26 (wave 2): one list of groups AND meetups (tagged), split into Active / Past, from
 // GET /api/hangouts; polls once a minute while focused; pull-to-refresh; and a banner naming what's still
 // missing from onboarding when it was skipped.
+// CHANGED Sep 26 (wave 5, Sahith): the bell shows an ember dot while there's anything unread.
 import type { HangoutSummary } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
 import { Link, Stack, useRouter, type Href } from 'expo-router';
@@ -12,6 +13,7 @@ import { usePullToRefresh } from '@/lib/query';
 import type { ReactNode } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { useHangouts, useMe } from '@/features/groups/queries';
+import { useUnreadCount } from '@/features/notifications/queries';
 import { Button, Card, Heading, Muted, Screen } from '@/components/ui';
 
 const STATUS_LABEL: Record<HangoutSummary['status'], string> = {
@@ -145,6 +147,7 @@ export function HomeScreen() {
   const router = useRouter();
   const hangouts = useHangouts();
   const me = useMe();
+  const unread = useUnreadCount();
   const ink = '#20201C';
   const pull = usePullToRefresh(() => Promise.all([hangouts.refetch(), me.refetch()]));
 
@@ -168,6 +171,9 @@ export function HomeScreen() {
             <View className="flex-row items-center gap-4">
               <Pressable accessibilityLabel="Notifications" onPress={() => router.push('/notifications')}>
                 <Bell size={20} color={ink} />
+                {unread > 0 ? (
+                  <View className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full border border-paper bg-ember" />
+                ) : null}
               </Pressable>
             </View>
           ),

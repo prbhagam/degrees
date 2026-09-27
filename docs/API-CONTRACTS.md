@@ -10,6 +10,8 @@ This file is what makes four people concurrent. It is implemented as TypeScript 
 
 **CHANGED Sep 26 (wave 4, branch `sahith/wave4-polish`)** — additive: per-member acceptance (`GroupMember.accepted`, `GroupResponse.myResponse` + `acceptedCount`, `HangoutSummary.needsResponse` + `acceptedCount`; `POST /groups/:id/respond` now records only the caller's answer and the group confirms once everyone has accepted); `PUT /api/groups/:id` renames; "Why this group" text is redacted per viewer so it never names anyone past 1st degree. Needs migration `0011`.
 
+**CHANGED Sep 26 (wave 5, branch `sahith/wave5-feedback`)** — additive: notifications are finally WRITTEN (`event_changed` joins the type list; `POST /api/notifications/read`; `GET`/`PUT /api/notifications/settings` + `MeResponse.notificationSettings`); the calendar moved from "Host a meetup" to the plan (`GroupResponse.times`, `POST /api/groups/:id/times`, `/times/:timeId/vote`, `/times/:timeId/choose`, `DELETE /times/:timeId`); `HangoutSummary.lastMessage` + `chatOpen` for the Chats tab; `POST /groups/:id/activity/restore` moves the row instead of copying it (no duplicate history); the planner enforces budget and distance. Needs migration `0012`.
+
 **Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
 **Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
 
@@ -38,7 +40,8 @@ GET  /api/me
       tags: { label, kind }[],               // CHANGED Sep 26 — was write-only; see below
       hasCompletedProfile: boolean,          // CHANGED wave 2: every onboarding step done (was name + city)
       profileStatus: { interests, about, preferences },   // Added wave 2 — what's still missing
-      preferences: UpdatePreferencesRequest | null }      // Added wave 2 — so the preferences screen prefills
+      preferences: UpdatePreferencesRequest | null,       // Added wave 2 — so the preferences screen prefills
+      notificationSettings: { hangouts, exchange, met, changes } }   // Added wave 5 — per-kind toggles, defaults all true
 
 PUT  /api/profile
   { displayName, bio, aiParagraph, city,
@@ -104,7 +107,11 @@ POST /api/events
 // Added wave 2: one list for Home — matched groups and meetups together, active first then past.
 GET  /api/hangouts
   → { hangouts: { id, kind: "matched"|"meetup", name, status, reasoning, memberCount, formedAt,
-                  scheduledAt, completedAt, roomCode (meetups, while valid), hostId, isPast }[] }
+                  scheduledAt, completedAt, roomCode (meetups, while valid), hostId, isPast,
+                  needsResponse, acceptedCount,                                  // Added wave 4
+                  lastMessage: { body, senderName, createdAt } | null,           // Added wave 5 — the Chats tab preview
+                  chatOpen: boolean }[] }                                        // Added wave 5 — meetup, or matched and not 'proposed'
+  // wave 5: scheduledAt is set for matched groups too once a time is chosen (see /times below).
 
 // ---- Matching -------------------------------------------------------------
 POST /api/match/run          // wave 2: 409 profile_incomplete until interests + home base + preferences exist
@@ -118,7 +125,9 @@ GET  /api/groups/:id
       activity: Activity | null, completedAt: string | null,   // CHANGED Sep 26
       kind, name, eventId, hostId, scheduledAt, roomCode, codeExpiresAt, icebreakers: string[],   // Added wave 2
       activityHistory: Activity[],    // Added wave 3: earlier 'ready' plans, newest first, current one excluded
-      myResponse: "pending"|"accepted", acceptedCount: number }   // Added wave 4: per-member acceptance
+      myResponse: "pending"|"accepted", acceptedCount: number,    // Added wave 4: per-member acceptance
+      times: TimeSlot[] }             // Added wave 5: proposed times for the plan, soonest first
+  // wave 5: activityHistory is de-duplicated by venue + title and never contains the current plan.
   // wave 4: `reasoning` is redacted per viewer — anyone not revealed to the viewer is replaced with "someone new".
   // Meetup members are never redacted (they're in the same room); matched groups keep the rule below.
   // degree and sharedInterests are relative to the viewer (the JWT user)
@@ -197,9 +206,35 @@ POST /api/groups/:id/activity/advance
   // the current stage and does no work (the running one holds a short lock).
 
 // Added wave 3: plans are kept, not replaced. Bring an earlier one (from GroupResponse.activityHistory) back as
-// the current plan — it's copied as a new row so history stays chronological. 404 activity_not_found otherwise.
+// the current plan. 404 activity_not_found otherwise.
+// CHANGED wave 5: the row itself moves to the top (created_at = now) instead of being copied — copying left the
+// original in history, so every switch added a duplicate under "Earlier plans". The restored plan keeps its id.
 POST /api/groups/:id/activity/restore
   { activityId: string } → Activity
+
+// ---- When (Added wave 5) -----------------------------------------------------
+// The calendar moved off "Host a meetup" (you're already with those people) onto the plan: members propose
+// times, mark which they're free for, and any member locks one in — that becomes groups.scheduled_at (and the
+// meetup's events.scheduled_at), shown on Home and the group screen, and everyone else gets event_changed
+// { change: "time" }. Every route returns the full list. Membership required; 403 hangout_archived once
+// completedAt + 24h has passed.
+POST   /api/groups/:id/times
+  { startsAt: string, note?: string }   // ISO 8601; rounded to the minute; idempotent on (group, minute)
+  → { times: TimeSlot[] }               // the proposer is automatically free for their own time
+POST   /api/groups/:id/times/:timeId/vote
+  { available: boolean } → { times: TimeSlot[] }   // idempotent
+POST   /api/groups/:id/times/:timeId/choose
+  → { times: TimeSlot[] }               // sets scheduledAt; notifies the others
+DELETE /api/groups/:id/times/:timeId
+  → { times: TimeSlot[] }               // 403 not_proposer unless you proposed it; unschedules if it was chosen
+
+type TimeSlot = {
+  id: string; startsAt: string; note: string | null;
+  proposedById: string; proposedByName: string;
+  availableIds: string[]; availableNames: string[];   // everyone who said they're free
+  imAvailable: boolean;                               // the viewer's own answer
+  chosen: boolean;                                    // the locked-in one (== GroupResponse.scheduledAt)
+}
 
 type Activity = {
   id?: string; createdAt?: string;   // Added wave 3: set on saved plans (history + restore); absent on a fresh model reply
@@ -271,6 +306,37 @@ GET  /api/notifications   // mock mode only
 type NotificationType =
   | "hangout_invited" | "hangout_forming" | "message_received"
   | "feedback_prompt" | "exchange_requested" | "exchange_accepted" | "connection_added"
+  | "event_changed"                                                    // Added wave 5
+
+// CHANGED wave 5: rows are actually written now (apps/server/src/lib/notify.ts — the only writer). Who gets what:
+//   hangout_invited     every other member when a matched group is proposed (POST /match/run, admin batch)
+//                       payload { groupId, memberCount }            — no names: the recipient may not have met them
+//   hangout_forming     every member when the last person accepts    payload { groupId, name, memberCount }
+//   connection_added    the other person when you tap "We met"       payload { peerId, peerName, eventId?, context }
+//                       each member when a meetup ends and they gained 1st degrees   payload { groupId, eventId, eventName, count }
+//   exchange_requested  the peer, the first time you say yes         payload { peerId, peerName, groupId? }
+//   exchange_accepted   the peer, when your yes completes the pair   (same payload; a re-tap never re-notifies)
+//   event_changed       every other member of a group or meetup      payload { groupId, name, change, detail? }
+//                       change: "renamed" (detail = new name) | "time" (detail = ISO startsAt) | "plan" (detail = title) | "ended"
+//   message_received / feedback_prompt: still nothing writes these.
+// Each kind is gated by the recipient's settings (below); the server drops rows they turned off.
+
+// Added wave 5: the client has no update grant on notifications, so marking read goes through the server.
+POST /api/notifications/read
+  → { ok: true }                    // every unread row of the caller
+
+// Added wave 5: per-kind toggles, stored on profiles.notification_settings (also on GET /api/me).
+GET  /api/notifications/settings
+  → { settings: NotificationSettings }
+PUT  /api/notifications/settings
+  Partial<NotificationSettings> → { settings: NotificationSettings }   // merged over the current values
+
+type NotificationSettings = {
+  hangouts: boolean;   // hangout_invited + hangout_forming
+  exchange: boolean;   // exchange_requested + exchange_accepted
+  met: boolean;        // connection_added
+  changes: boolean;    // event_changed
+}
 ```
 
 ---
@@ -302,6 +368,10 @@ generateActivity(input: {
   // wave 3: every member's avoids become HARD RULES in the prompt (e.g. "Alcohol" → no bars/pubs/breweries…), a
   // grounded reply that still names an alcohol-centred venue is rejected before Places, and Ticketmaster events
   // are filtered the same way. Previously avoids were passed as interests, which is why pubs got recommended.
+  // wave 5: budget and distance are HARD CONSTRAINTS too (the prompt carries the centre coordinates and the
+  // shared interests), and the assembled plan is checked — farther than maxTravelMi (+15%) or dearer than
+  // maxCostCents throws a ConstraintError. In the staged job a rejection goes back to the grounded stage with
+  // "Rejected — do not pick these…" in the prompt (job.rejected, max 2) before the chain falls through.
 
 analyzeFeedback(freeText: string): Promise<{
   tags: { label: string; kind: "derived" }[];

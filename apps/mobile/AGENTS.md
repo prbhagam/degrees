@@ -11,9 +11,10 @@ The Degrees iOS app: **Expo SDK 57 · React Native 0.86 · Expo Router · Native
 ```
 src/app/                 Expo Router routes. Every file is a screen; _layout.tsx files are navigators.
   _layout.tsx            providers (TanStack Query) + root Stack. Rarely changes.
-  (tabs)/_layout.tsx     the bottom nav (Home · Circle · You) from the validated design     (Charles)
+  (tabs)/_layout.tsx     the bottom nav (Home · Chats · Circle · You) from the validated design; items centred over the home indicator (wave 5)  (Charles)
   (tabs)/index.tsx                         → features/home          (Pranav) your groups, find a group, meet someone, host/join
-  (tabs)/circle.tsx                        → features/circle        (Pranav) Your circle: list + map + Play (BumpPlayground, wave 4), contact exchange (wave 3)
+  (tabs)/chats.tsx                         → features/chat          (Pranav) wave 5: every open group chat, newest message first
+  (tabs)/circle.tsx                        → features/circle        (Pranav) Your circle: list + the physics map (CircleGraph, wave 5: drag/fling anyone, mutual friends cluster), contact exchange (wave 3)
   (tabs)/profile.tsx                       → features/profile       (Charles) "Degree 0 (You)"
   login.tsx signup.tsx                     → features/auth          (Charles)
   onboarding/{interests,about,preferences}.tsx → features/onboarding (Charles)
@@ -22,14 +23,16 @@ src/app/                 Expo Router routes. Every file is a screen; _layout.tsx
   join/index.tsx  join/[roomCode].tsx      → features/events        (Pranav) room code entry · joins, then opens groups/[id] (wave 2)
   connect/index.tsx  connect/[peerId].tsx  → features/events        (Pranav) my QR (needs an active event) · deep-link target that forms an edge
   scan.tsx                                 → features/events        (Pranav) one scanner for event + person QR codes
-  create-event.tsx                         → features/events        (Pranav) host a hangout
+  create-event.tsx                         → features/events        (Pranav) host a meetup — starts now, no calendar (wave 5)
   match.tsx                                → features/groups        (Pranav) runs matching, then opens the group
   groups/[id]/index.tsx                    → features/groups        (Pranav) one screen for matched groups AND meetups (wave 2): members + "We met",
                                                                      code/QR, icebreakers, per-member accept/decline (wave 4), rename, end/complete, leave
-  groups/[id]/activity.tsx                 → features/activity      (Pranav) current plan + earlier plans with "Use this plan" (wave 3)
-  groups/[id]/chat.tsx                     → features/chat          (Pranav) Realtime + 3s polling fallback
+  groups/[id]/activity.tsx                 → features/activity      (Pranav) current plan + earlier plans with "Use this plan" (wave 3) + "When": propose
+                                                                     times, mark yourself free, lock one in (TimesCard, wave 5)
+  groups/[id]/chat.tsx                     → features/chat          (Pranav) Realtime + 3s polling fallback; header is the group's name (wave 5)
   groups/[id]/photos.tsx                   → features/photos        (Pranav) grid → full-screen viewer (pinch zoom, save to camera roll; wave 3)
-  notifications.tsx                        → features/notifications (Christian)
+  notifications.tsx                        → features/notifications (Christian) Realtime feed, marks itself read on open (wave 5)
+  notifications/settings.tsx               → features/notifications (Christian) wave 5: one switch per kind of notification
 src/features/<feature>/  the real screens, components, and hooks for that feature
 src/lib/api.ts           typed fetch wrapper for every API endpoint; attaches the Supabase JWT
 src/lib/supabase.ts      publishable-key Supabase client (READS ONLY)
@@ -40,8 +43,10 @@ src/stores/session.ts    Zustand: currentUser, activeGroupId, activeEvent (persi
 src/features/onboarding/flow.ts  wave 2: next/skip/returnTo for the three onboarding steps
 src/features/onboarding/options.ts  wave 3: COMMON_INTERESTS + AVOID_OPTIONS, shared by onboarding and Edit profile
 src/components/ui.tsx    the app's one UI kit (validated design) — use it instead of new primitives
-src/components/DegreesMark.tsx   wave 4: the brand mark drawn in code (rings + orbiting node); LoadingState uses it animated
-src/components/AnimatedSplash.tsx  wave 4: the ~1.5s animated splash mounted by the root layout after the native (plain paper) splash
+src/components/DegreesMark.tsx   wave 4: the brand mark drawn in code (rings + orbiting node); LoadingState uses it animated. Wave 5: the rings
+                                 ripple after the node; the same geometry is rendered into assets/images/icon.png + splash-icon.png
+src/components/AnimatedSplash.tsx  wave 4: the animated splash mounted by the root layout. Wave 5: the native splash shows the mark PNG at 132pt
+                                 (app.json), so this starts from the same pixels, brings the logo alive, then lifts (~2s)
 ```
 
 ## The routing pattern (why nobody collides)
@@ -69,6 +74,7 @@ Deep links come free from the `degrees` scheme in `app.json`. For example, `degr
 - Fetch through **TanStack Query** (`useQuery` / `useMutation` wrapping `api.*`). The server is the source of truth, so no optimistic local state. **Wave 2:** every list screen has a `RefreshControl`; screens showing live data pass `refetchInterval: LIVE_POLL_MS` (one minute, focused only); the cache is persisted to disk (`PersistQueryClientProvider`, cleared on sign-out) so `queryKeys` in `features/groups/queries.ts` are the shared key registry — bump `persistOptions.buster` when a cached shape changes. **Wave 4:** drive `RefreshControl` with `usePullToRefresh(query.refetch)` from `lib/query.ts`, never `query.isRefetching` — the latter opens the spinner on every background poll and shoves the list.
 - **Realtime needs the JWT on the socket.** `useMessages` calls `supabase.realtime.setAuth(session.access_token)` before subscribing (verified against the shared project: without it the channel says SUBSCRIBED and delivers nothing). Do the same for any new subscription. **One channel topic per hook instance** (a random suffix, see `useGroup`): supabase-js caches channels by topic and `.on()` on an already-subscribed channel throws "cannot add postgres_changes callbacks after subscribe()". `useGroup` (wave 3) watches `activities`, `group_members`, and the `groups` row on one channel.
 - **Home is `/`.** Never navigate to `'/index'` — it isn't a route the router knows and lands on "Unmatched Route" (wave 3 fix). From a pushed screen, go home with `router.dismissTo('/')`; from login/onboarding use `enterApp()`.
+- **One title per group.** `hangoutTitle()` in `features/groups/degrees.ts` names a group everywhere (group screen, chat header, Chats tab): the saved name, else "You + …". Don't hard-code "Group chat" or "Your group" in a header.
 - **Speak in degrees, lightly.** You are degree 0; people you've met are your 1st degree; friends of friends are 2nd. Use it where it explains something (member badges via `memberDegreeLabel`, Profile is "Degree 0 (You)", the preferences dial) and not as decoration — wave 4 thinned it back after it started to clutter. The tab is "Your circle". The brand motif is the mark (`DegreesMark`) and the `°` glyph.
 - Types and Zod schemas come from `@degrees/shared`. Use the shared schemas for form validation, and don't redeclare shapes.
 
@@ -121,10 +127,19 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 
 ---
 
+## Wave 5 (Sep 26, third testing round — Sahith)
+
+- **Chats tab** (`(tabs)/chats.tsx` → `features/chat/ChatsScreen.tsx`): every hangout whose `chatOpen` is true (a meetup, or a confirmed matched group), sorted by `lastMessage.createdAt`; both fields are new on `HangoutSummary`. Tap → `groups/[id]/chat`, whose header is now the group's name.
+- **Tab bar** items are centred: the bar's height includes the safe-area inset and pads both sides, instead of leaving the whole home-indicator strip blank underneath.
+- **Host a meetup has no calendar.** You host when you're already with the people; it starts now and the code works 24h. Scheduling moved to the plan: `features/activity/TimesCard.tsx` lists proposed times (`GroupResponse.times`), "I'm free" per time, "Lock in" (sets `scheduledAt`, any member), remove your own, propose with the date picker, and a link into chat to talk it through. `useGroup` also subscribes to `group_times` / `group_time_votes` (migration 0012). The group screen shows the locked-in time for matched groups too.
+- **"Use this plan"** no longer duplicates: the server moves the row instead of copying it, and `ActivityScreen.applyPlan` mirrors that in the cache (restored plan leaves Earlier plans; the outgoing current plan joins them) before the refetch.
+- **Notifications** are real: the server writes `hangout_invited`, `hangout_forming`, `exchange_requested`/`accepted`, `connection_added`, and the new `event_changed` (`payload.change`: renamed | time | plan | ended). `useNotifications` subscribes to Realtime on `notifications` (JWT on the socket) with the 60s poll as fallback; `useUnreadCount()` puts an ember dot on Home's bell; the feed calls `POST /api/notifications/read` on open. `notifications/settings.tsx` has four switches (`MeResponse.notificationSettings`, `PUT /api/notifications/settings`, optimistic with rollback).
+- Query cache buster is `wave5` (`HangoutSummary` and `GroupResponse` grew).
+
 ## Known gaps (Sep 26, after wave 3)
 
 Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
-- **Notifications** poll once a minute (no Realtime, no mark-read), and nothing writes rows yet.
+- ~~**Notifications** poll once a minute (no Realtime, no mark-read), and nothing writes rows yet.~~ Done in wave 5 (Realtime, mark-read, settings, server writers). `message_received` and `feedback_prompt` still have no writer.
 - **Feedback**: the group-tag chips are never sent. (Contact exchange moved to 1st-degree friends in wave 3, with a real "wants your number" state for the peer; the fake "(demo: they said yes)" link is gone.)
 - **Photo save** uses `expo-media-library`, which Expo Go bundles; a dev build needs the plugin entry in `app.json` (added).
 - **About**: "Generate tags" is still canned (a real endpoint is Christian's); accepted tags now go out as `hobby`.

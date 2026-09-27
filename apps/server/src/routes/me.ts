@@ -1,4 +1,5 @@
 // Owner: Christian (Server & Infra) — see docs/ROLES.md.
+// CHANGED Sep 26 (wave 5, Sahith): also returns notificationSettings (profiles.notification_settings, defaults merged).
 import { Hono } from 'hono';
 import type { MeResponse, TagKind } from '@degrees/shared';
 import { env } from '../config/env.js';
@@ -12,6 +13,7 @@ import {
   toPreferences,
   type PreferencesRow,
 } from '../lib/profileStatus.js';
+import { mergeSettings } from '../lib/notify.js';
 import { meFixture } from '../mocks/fixtures.js';
 
 export const meRoutes = new Hono<AppEnv>().get('/me', async (context) => {
@@ -26,7 +28,7 @@ export const meRoutes = new Hono<AppEnv>().get('/me', async (context) => {
   const [profileResult, tagsResult, prefsResult] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id, username, display_name, bio, ai_paragraph, city, phone, pronouns, photo_url')
+      .select('id, username, display_name, bio, ai_paragraph, city, phone, pronouns, photo_url, notification_settings')
       .eq('id', userId)
       .single(),
     supabase.from('profile_tags').select('label, kind').eq('user_id', userId),
@@ -69,6 +71,7 @@ export const meRoutes = new Hono<AppEnv>().get('/me', async (context) => {
     hasCompletedProfile: isProfileComplete(profileStatus),
     profileStatus,
     preferences: toPreferences(prefsRow),
+    notificationSettings: mergeSettings(data.notification_settings),
   };
 
   return context.json(response);

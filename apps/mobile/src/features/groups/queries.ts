@@ -41,6 +41,7 @@ export function useMe() {
 // it polls every 2s and also subscribes to `activities` so the 'ready' row lands the moment it's written.
 // Wave 3: the same channel also watches `group_members` (someone joins or leaves) and the `groups` row itself
 // (ended, confirmed), so everyone already in a meetup sees a new arrival without pulling to refresh.
+// Wave 5: and `group_times` + `group_time_votes`, so the plan's "When" card is live too.
 export function useGroup(id: string | undefined, { live = false }: { live?: boolean } = {}) {
   const queryClient = useQueryClient();
   // supabase-js caches channels by topic: a second screen calling this hook for the same group would get the
@@ -91,6 +92,17 @@ export function useGroup(id: string | undefined, { live = false }: { live?: bool
             refresh();
             void queryClient.invalidateQueries({ queryKey: queryKeys.hangouts });
           },
+        )
+        // Wave 5: proposed times and "I'm free" taps (migration 0012) show for everyone on the plan screen.
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'group_times', filter: `group_id=eq.${id}` },
+          refresh,
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'group_time_votes', filter: `group_id=eq.${id}` },
+          refresh,
         )
         .subscribe((status, error) => {
           if (__DEV__ && error) console.warn(`[group] realtime ${status}: ${error.message}`);

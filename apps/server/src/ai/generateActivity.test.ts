@@ -7,9 +7,12 @@ import { activityFixture } from '../mocks/fixtures.js';
 import {
   activityJobSchema,
   avoidRules,
+  constraintViolation,
   isPreviousVenue,
+  MAX_REJECTIONS,
   newActivityJob,
   runActivityStage,
+  sharedInterests,
   violatesAvoids,
 } from './generateActivity.js';
 
@@ -112,6 +115,88 @@ await test('isPreviousVenue matches loosely against the venues already suggested
   assert.ok(isPreviousVenue('the painted duck', seen));
   assert.equal(isPreviousVenue('Stone Summit Midtown', seen), false);
   assert.equal(isPreviousVenue('', seen), false);
+});
+
+// Wave 5: budget and distance are enforced on the assembled plan, and a rejection retries the grounded stage
+// with the reason in the prompt before the chain falls through.
+await test('constraintViolation rejects plans outside the range or over budget, accepts the rest', async () => {
+  const near = { venue: 'Stone Summit', lat: 33.7822, lng: -84.4058, priceCents: 2200 };
+  assert.equal(constraintViolation(near, input), null);
+  // Athens, GA is ~60 miles from campus.
+  const far = { venue: 'Athens Bowl', lat: 33.951, lng: -83.3757, priceCents: 1000 };
+  assert.match(constraintViolation(far, input) ?? '', /miles away/);
+  const dear = { ...near, priceCents: 9900 };
+  assert.match(constraintViolation(dear, input) ?? '', /budget is \$30/);
+  // Unknown price is not a violation; a little past the range still counts as inside.
+  assert.equal(constraintViolation({ ...near, priceCents: null }, input), null);
+  const edge = { venue: 'Edge', lat: 33.7756 + 10.8 / 69, lng: -84.3963, priceCents: null };
+  assert.equal(constraintViolation(edge, input), null);
+});
+
+await test('sharedInterests prefers labels two or more members share, else everyone\'s', async () => {
+  const group: GenerateActivityInput = {
+    ...input,
+    members: [
+      { displayName: 'Avery', interests: ['Bouldering', 'coffee'], avoids: [] },
+      { displayName: 'Maya', interests: ['coffee', 'ceramics'], avoids: [] },
+      { displayName: 'Leo', interests: ['bouldering', 'arcades'], avoids: [] },
+    ],
+  };
+  assert.deepEqual(sharedInterests(group), ['Bouldering', 'coffee']);
+  assert.deepEqual(sharedInterests(input), ['bouldering']);
+});
+
+await test('a plan that resolves too far away sends the job back to grounded with the rejection recorded', async () => {
+  // No Places key: assembleFromMaps falls back to the model coordinates, which are outside the 10-mile range.
+  const job = {
+    ...newActivityJob(),
+    stage: 'places' as const,
+    plan: { venue: 'Athens Bowl', title: 'Bowling', reasoning: 'r', lat: 33.951, lng: -83.3757, estimatedPricePerPersonUsd: 10 },
+    places: [],
+  };
+  const result = await runActivityStage(job, input, 2000);
+  assert.equal(result.activity, null);
+  assert.equal(result.job.stage, 'grounded');
+  assert.equal(result.job.rejected.length, 1);
+  assert.equal(result.job.rejected[0]?.venue, 'Athens Bowl');
+  assert.match(result.job.rejected[0]?.reason ?? '', /range|miles/);
+  assert.equal(result.job.plan, undefined);
+});
+
+await test('an over-budget plan is rejected the same way', async () => {
+  const job = {
+    ...newActivityJob(),
+    stage: 'places' as const,
+    plan: { venue: 'Fancy Spot', title: 'Tasting menu', reasoning: 'r', lat: 33.78, lng: -84.39, estimatedPricePerPersonUsd: 120 },
+    places: [],
+  };
+  const result = await runActivityStage(job, input, 2000);
+  assert.equal(result.activity, null);
+  assert.equal(result.job.stage, 'grounded');
+  assert.match(result.job.rejected[0]?.reason ?? '', /budget/);
+});
+
+await test(`after ${MAX_REJECTIONS} rejections a constraint failure falls through the chain instead of retrying`, async () => {
+  const job = {
+    ...newActivityJob(),
+    stage: 'places' as const,
+    plan: { venue: 'Athens Bowl', title: 'Bowling', reasoning: 'r', lat: 33.951, lng: -83.3757 },
+    places: [],
+    rejected: [
+      { venue: 'A', reason: 'too far' },
+      { venue: 'B', reason: 'too dear' },
+    ],
+  };
+  const result = await runActivityStage(job, input, 2000);
+  assert.equal(result.activity, null);
+  assert.equal(result.job.stage, 'ticketmaster');
+  assert.equal(result.job.rejected.length, MAX_REJECTIONS);
+});
+
+await test('an older job row without `rejected` still parses', async () => {
+  const parsed = activityJobSchema.parse({ stage: 'grounded', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+  assert.deepEqual(parsed.rejected, []);
+  assert.deepEqual(parsed.errors, []);
 });
 
 console.warn = silence;
