@@ -6,7 +6,8 @@ import { Hono } from 'hono';
 import type { GroupStatus, HangoutKind, HangoutsResponse, HangoutSummary } from '@degrees/shared';
 import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
-import { isCodeOpen, MEETUP_COLUMNS, type MeetupRow } from '../lib/groups.js';
+import { exploreFrom, profileBasics } from '../lib/graph.js';
+import { isCodeOpen, MEETUP_COLUMNS, redactReasoning, type MeetupRow } from '../lib/groups.js';
 import type { AppEnv } from '../middleware/auth.js';
 import { hangoutsFixture } from '../mocks/fixtures.js';
 import { mockHostedEvents } from './events.js';
@@ -48,6 +49,8 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
       roomCode,
       hostId: context.get('userId'),
       isPast: false,
+      needsResponse: false,
+      acceptedCount: event.attendeeIds.length,
     }));
     const response = { hangouts: [...hosted, ...hangoutsFixture.hangouts] } satisfies HangoutsResponse;
     return context.json(response);
@@ -57,12 +60,13 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
   const db = getServiceClient();
   const { data: memberships, error } = await db
     .from('group_members')
-    .select('group_id')
+    .select('group_id, accepted_at')
     .eq('user_id', userId);
   if (error) {
     throw new Error(`group_members read failed: ${error.message}`);
   }
   const groupIds = memberships.map((row) => row.group_id as string);
+  const myAcceptance = new Map(memberships.map((row) => [row.group_id as string, row.accepted_at as string | null]));
   if (groupIds.length === 0) {
     const response = { hangouts: [] } satisfies HangoutsResponse;
     return context.json(response);
@@ -73,7 +77,7 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
       .from('groups')
       .select('id, kind, name, status, reasoning, formed_at, scheduled_at, completed_at, created_by')
       .in('id', groupIds),
-    db.from('group_members').select('group_id').in('group_id', groupIds),
+    db.from('group_members').select('group_id, user_id, accepted_at').in('group_id', groupIds),
     db.from('events').select(MEETUP_COLUMNS).in('group_id', groupIds),
   ]);
   if (groups.error) throw new Error(`groups read failed: ${groups.error.message}`);
@@ -81,9 +85,35 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
   if (meetups.error) throw new Error(`events read failed: ${meetups.error.message}`);
 
   const memberCount = new Map<string, number>();
+  const acceptedCount = new Map<string, number>();
+  const memberIds = new Map<string, string[]>();
   for (const row of counts.data) {
     const id = row.group_id as string;
     memberCount.set(id, (memberCount.get(id) ?? 0) + 1);
+    if (row.accepted_at) acceptedCount.set(id, (acceptedCount.get(id) ?? 0) + 1);
+    memberIds.set(id, [...(memberIds.get(id) ?? []), row.user_id as string]);
+  }
+  // Wave 4: a proposed matched group's reasoning must not name anyone the viewer hasn't met (same rule as
+  // GET /groups/:id). Everyone at 1st degree is revealed; anyone else's name is scrubbed.
+  const proposedIds = (groups.data as GroupRow[])
+    .filter((row) => (row.status ?? 'proposed') === 'proposed' && (row.kind ?? 'matched') === 'matched')
+    .map((row) => row.id);
+  const hiddenNamesByGroup = new Map<string, string[]>();
+  if (proposedIds.length > 0) {
+    const { reach } = await exploreFrom(userId, 1);
+    const candidates = [...new Set(proposedIds.flatMap((id) => memberIds.get(id) ?? []))].filter(
+      (id) => id !== userId && !reach.has(id),
+    );
+    const basics = await profileBasics(candidates);
+    for (const id of proposedIds) {
+      hiddenNamesByGroup.set(
+        id,
+        (memberIds.get(id) ?? []).flatMap((memberId) => {
+          const name = basics.get(memberId)?.displayName;
+          return candidates.includes(memberId) && name ? [name] : [];
+        }),
+      );
+    }
   }
   const meetupByGroup = new Map(
     (meetups.data as MeetupRow[]).map((row) => [row.group_id as string, row]),
@@ -94,12 +124,13 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
     const status = row.status ?? 'proposed';
     const scheduledAt = iso(row.scheduled_at ?? meetup?.scheduled_at ?? null);
     const completedAt = iso(row.completed_at ?? meetup?.ended_at ?? null);
+    const kind = row.kind ?? (meetup ? 'meetup' : 'matched');
     return {
       id: row.id,
-      kind: row.kind ?? (meetup ? 'meetup' : 'matched'),
+      kind,
       name: row.name ?? meetup?.name ?? null,
       status,
-      reasoning: row.reasoning ?? '',
+      reasoning: redactReasoning(row.reasoning ?? '', hiddenNamesByGroup.get(row.id) ?? []),
       memberCount: memberCount.get(row.id) ?? 0,
       formedAt: iso(row.formed_at),
       scheduledAt,
@@ -107,6 +138,8 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
       roomCode: meetup && isCodeOpen(meetup) ? meetup.room_code : null,
       hostId: row.created_by ?? meetup?.created_by ?? null,
       isPast: isPastHangout({ status, completedAt, scheduledAt }),
+      needsResponse: kind === 'matched' && status === 'proposed' && !myAcceptance.get(row.id),
+      acceptedCount: acceptedCount.get(row.id) ?? 0,
     };
   });
 

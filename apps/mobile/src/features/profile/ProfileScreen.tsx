@@ -1,7 +1,7 @@
 // Owner: Charles (Onboarding & Profile) — see docs/ROLES.md.
 // CHANGED Sep 26 (wave 3): you are "Degree 0" — the app's own vocabulary, used everywhere from here out.
 import { Stack, useRouter } from 'expo-router';
-import { ChevronRight, QrCode } from 'lucide-react-native';
+import { ChevronRight } from 'lucide-react-native';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import {
   Avatar,
@@ -17,12 +17,14 @@ import {
 import { api } from '@/lib/api';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from '@/lib/supabase';
 import { useMe } from '@/features/groups/queries';
+import { usePullToRefresh } from '@/lib/query';
 import { useSessionStore } from '@/stores/session';
 
 export function ProfileScreen() {
   const router = useRouter();
   const me = useMe();
   const setCurrentUser = useSessionStore((state) => state.setCurrentUser);
+  const pull = usePullToRefresh(me.refetch);
 
   async function logout() {
     if (!isSupabaseEnvironmentUnset()) {
@@ -35,7 +37,7 @@ export function ProfileScreen() {
   }
 
   return (
-    <Screen refreshControl={<RefreshControl refreshing={me.isRefetching} onRefresh={() => void me.refetch()} />}>
+    <Screen refreshControl={<RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />}>
       <Stack.Screen options={{ title: 'Degree 0 (You)' }} />
       {me.isPending ? <LoadingState label="Loading profile…" /> : null}
       {me.isError ? <ErrorState message={me.error.message} onRetry={() => void me.refetch()} /> : null}
@@ -47,8 +49,8 @@ export function ProfileScreen() {
               <Text className="font-body-semibold text-lg text-ink">
                 {me.data.displayName ?? me.data.username}
               </Text>
-              <Muted>@{me.data.username} · Degree 0</Muted>
-              <Muted>Every degree in Degrees is measured from you.</Muted>
+              <Muted>@{me.data.username}</Muted>
+              <Muted>You're degree 0. People you've met are your 1st degree; their friends are your 2nd.</Muted>
             </View>
           </View>
 
@@ -72,25 +74,7 @@ export function ProfileScreen() {
             </Card>
           </Pressable>
 
-          <Pressable onPress={() => router.push('/connect')}>
-            <Card className="flex-row items-center gap-3">
-              <View className="h-9 w-9 items-center justify-center rounded-m border border-line bg-paper">
-                <QrCode size={18} color="#20201C" />
-              </View>
-              <View className="flex-1">
-                <Text className="font-body-semibold text-[15px] text-ink">My QR code</Text>
-                <Muted>Scan in person — they become your 1st degree</Muted>
-              </View>
-            </Card>
-          </Pressable>
-
           <Card className="p-0">
-            <SectionRow
-              title="1st-degree friends"
-              subtitle="Everyone you've met in person — and where numbers get exchanged"
-              onPress={() => router.push('/circle')}
-              right={<ChevronRight size={18} color="#8A8378" />}
-            />
             <SectionRow
               title="Edit profile"
               subtitle="Name, bio, interests, rather-skips, home base"

@@ -2,11 +2,12 @@
 // CHANGED Sep 26: members past 1st degree are redacted (no name, no `via`) — see degrees.ts.
 // CHANGED Sep 26 (wave 2): one screen for both kinds. A meetup shows its room code + QR, everyone present with a
 // per-person "We met" (hidden once an edge exists), icebreakers, and "End meetup" (which connects everyone).
-// A matched group keeps accept/decline; once confirmed it gets the same per-person "We met" — completing a
-// matched group no longer connects people by itself.
 // CHANGED Sep 26 (wave 3): leaving a live meetup undoes only the connections that meetup made for you (edges tagged
 // with its event id); people you already knew stay 1st degree. Both kinds still can't be left once wrapped up.
-// Meetups get "How did it go?" too. Members are labelled by degree.
+// CHANGED Sep 26 (wave 4): every member accepts or declines for themselves. A matched group stays "proposed"
+// until everyone has said yes: you see Accept / Decline until you've answered, then "waiting on N" with a tick per
+// person who's in. Chat and the plan open once it's confirmed. Any member can rename the group. "Why this group"
+// never names anyone you haven't met (server-side redaction).
 import type { Activity, GroupMember } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -14,10 +15,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
   ChevronRight,
+  Clock,
   Image as ImageIcon,
   LogOut,
   MapPin,
   MessageCircle,
+  Pencil,
   QrCode,
   RefreshCw,
   Sparkles,
@@ -30,6 +33,7 @@ import { formatPrice, formatStartsAt } from '@/features/activity/format';
 import { useActivityJob } from '@/features/activity/useActivityJob';
 import { joinLink } from '@/features/events/links';
 import { api } from '@/lib/api';
+import { usePullToRefresh } from '@/lib/query';
 import { useSessionStore } from '@/stores/session';
 import { firstName, memberDegreeLabel, memberDisplayName } from './degrees';
 import { queryKeys, useGroup } from './queries';
@@ -51,6 +55,7 @@ function MemberRow({
   member,
   index,
   canMeet,
+  showAcceptance,
   groupId,
   isMeetup,
   eventId,
@@ -58,6 +63,7 @@ function MemberRow({
   member: GroupMember;
   index: number;
   canMeet: boolean;
+  showAcceptance: boolean;
   groupId: string;
   isMeetup: boolean;
   eventId: string | null;
@@ -90,7 +96,7 @@ function MemberRow({
           <DegreeBadge label={degreeLabel} tone={tone} />
         </View>
         {!member.revealed && member.degree > 0 ? (
-          <Muted>Past your 1st degree — you'll see who they are once you've hung out together.</Muted>
+          <Muted>You'll see who this is once you've hung out together.</Muted>
         ) : null}
         {member.revealed && member.bio ? <Muted numberOfLines={2}>{member.bio}</Muted> : null}
         {member.sharedInterests.length > 0 ? (
@@ -101,7 +107,19 @@ function MemberRow({
           </View>
         ) : null}
       </View>
-      {showMeet ? (
+      {showAcceptance ? (
+        member.accepted ? (
+          <View className="flex-row items-center gap-1">
+            <Check size={16} color="#5B7A6B" />
+            <Text className="font-body-medium text-sm text-sage">In</Text>
+          </View>
+        ) : (
+          <View className="flex-row items-center gap-1">
+            <Clock size={16} color="#8A8378" />
+            <Text className="font-body-medium text-sm text-muted">Deciding</Text>
+          </View>
+        )
+      ) : showMeet ? (
         member.met ? (
           <View className="flex-row items-center gap-1">
             <Check size={16} color="#5B7A6B" />
@@ -253,11 +271,15 @@ export function GroupScreen() {
   }, [id, setActiveGroupId]);
 
   const group = useGroup(id, { live: true });
+  const pull = usePullToRefresh(group.refetch);
   const data = group.data;
   // Wave 2: keeps a plan job advancing while this screen is open (see features/activity/useActivityJob).
   useActivityJob(id, data?.activityStatus === 'generating' || data?.activity?.status === 'generating');
   const isMeetup = data?.kind === 'meetup';
-  const isInvited = data?.status === 'proposed' && !isMeetup;
+  const isProposed = data?.status === 'proposed' && !isMeetup;
+  // Wave 4: your own answer is what gates the screen, not the group's status.
+  const isInvited = isProposed && data?.myResponse === 'pending';
+  const isWaiting = isProposed && data?.myResponse === 'accepted';
   const isCompleted = Boolean(data?.completedAt);
 
   // Being in a live meetup makes it the event a QR-formed connection is tied to (ConnectScreen). The id is the
@@ -284,6 +306,11 @@ export function GroupScreen() {
     },
   });
 
+  const rename = useMutation({
+    mutationFn: (name: string) => api.renameGroup(id!, name),
+    onSuccess: invalidate,
+  });
+
   const complete = useMutation({
     mutationFn: () => api.completeGroup(id!),
     onSuccess: () => {
@@ -302,6 +329,19 @@ export function GroupScreen() {
       router.dismissTo('/');
     },
   });
+
+  const promptRename = () => {
+    Alert.prompt(
+      isMeetup ? 'Name this meetup' : 'Name this group',
+      'Everyone in it sees the new name.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Save', onPress: (text?: string) => { if (text?.trim()) rename.mutate(text.trim()); } },
+      ],
+      'plain-text',
+      data?.name ?? '',
+    );
+  };
 
   const confirmLeave = () => {
     Alert.alert(
@@ -340,16 +380,14 @@ export function GroupScreen() {
       : data && data.unrevealedCount > 0
         ? `You + ${data.unrevealedCount} new people`
         : 'Your group';
+  const waitingOn = data ? data.members.length - data.acceptedCount : 0;
+  const everyoneElsePassed = isProposed && others.length === 0;
 
   // "We met" is offered in a live meetup, or in a matched group once everyone has agreed to meet.
-  const canMeet = Boolean(data) && !isInvited;
+  const canMeet = Boolean(data) && !isProposed;
 
   return (
-    <Screen
-      refreshControl={
-        <RefreshControl refreshing={group.isRefetching} onRefresh={() => void group.refetch()} />
-      }
-    >
+    <Screen refreshControl={<RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />}>
       <Stack.Screen options={{ title: isMeetup ? 'Meetup' : 'Your group' }} />
       {group.isPending ? <LoadingState label="Loading…" /> : null}
       {group.isError ? (
@@ -358,24 +396,61 @@ export function GroupScreen() {
       {data ? (
         <>
           <View className="gap-1">
-            <Text className="font-display text-2xl text-ink">{title}</Text>
+            <View className="flex-row items-start gap-2">
+              <Text className="flex-1 font-display text-2xl text-ink">{title}</Text>
+              {!isCompleted ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Rename"
+                  hitSlop={8}
+                  onPress={promptRename}
+                  className="mt-1.5 h-8 w-8 items-center justify-center rounded-full bg-paper-raised"
+                >
+                  <Pencil size={14} color="#8A8378" />
+                </Pressable>
+              ) : null}
+            </View>
+            {rename.isError ? <Muted>{rename.error.message}</Muted> : null}
             {isMeetup && data.scheduledAt ? (
               <Muted>{format(parseISO(data.scheduledAt), 'EEEE, MMM d · h:mm a')}</Muted>
             ) : null}
             {isCompleted ? <Muted>{isMeetup ? 'Ended' : 'Wrapped up'} — chat and photos close 24h after.</Muted> : null}
-            {!isMeetup && data.unrevealedCount > 0 ? (
-              <Muted>{data.unrevealedCount} {data.unrevealedCount === 1 ? 'person is' : 'people are'} past your 1st degree — names unlock when you meet.</Muted>
-            ) : null}
           </View>
 
           {isInvited ? (
             <Card className="border-ember">
-              <Heading>New hangout suggested for you</Heading>
-              <Body>Take a look — you can say no, no hard feelings.</Body>
+              <Heading>New group suggested for you</Heading>
+              <Body>
+                Take a look. Everyone decides for themselves — the group forms once all {data.members.length} say yes.
+                {data.unrevealedCount > 0
+                  ? ` ${data.unrevealedCount === 1 ? "One person here is" : `${data.unrevealedCount} people here are`} past your 1st degree; names unlock when it forms.`
+                  : ''}
+              </Body>
             </Card>
           ) : null}
 
-          {!isMeetup && data.reasoning ? (
+          {isWaiting && !everyoneElsePassed ? (
+            <Card className="border-sage/40 bg-paper-raised">
+              <View className="flex-row items-center gap-2">
+                <Clock size={16} color="#5B7A6B" />
+                <Heading>You're in</Heading>
+              </View>
+              <Body>
+                Waiting on {waitingOn} {waitingOn === 1 ? 'person' : 'people'} to decide. Chat and the plan open the
+                moment everyone's in.
+              </Body>
+            </Card>
+          ) : null}
+
+          {everyoneElsePassed ? (
+            <Card className="border-line bg-paper-raised">
+              <Heading>Everyone else passed on this one</Heading>
+              <Body>No hard feelings — run matching again for a fresh group.</Body>
+              <Button label="Find another group" onPress={() => router.replace('/match')} />
+            </Card>
+          ) : null}
+
+          {!isMeetup && data.reasoning && !everyoneElsePassed ? (
             <Card className="border-line bg-paper-raised">
               <View className="flex-row items-center gap-2">
                 <Sparkles size={16} color="#5B7A6B" />
@@ -413,26 +488,35 @@ export function GroupScreen() {
             </Card>
           ) : null}
 
-          <Card>
-            <Heading>{isMeetup ? `Here · ${data.members.length}` : `${data.members.length} people`}</Heading>
-            {isMeetup && !isCompleted ? (
-              <Muted>Tap "We met" for anyone you actually talked to — they become 1st degree. Ending the meetup connects everyone anyway.</Muted>
-            ) : null}
-            {!isMeetup && canMeet && !isCompleted ? (
-              <Muted>Tap "We met" once you've actually hung out — that's what makes them 1st degree.</Muted>
-            ) : null}
-            {data.members.map((member, index) => (
-              <MemberRow
-                key={member.id ?? `unrevealed-${index}`}
-                member={member}
-                index={index}
-                canMeet={canMeet}
-                groupId={id!}
-                isMeetup={isMeetup}
-                eventId={data.eventId}
-              />
-            ))}
-          </Card>
+          {!everyoneElsePassed ? (
+            <Card>
+              <Heading>
+                {isMeetup
+                  ? `Here · ${data.members.length}`
+                  : isProposed
+                    ? `${data.acceptedCount} of ${data.members.length} in`
+                    : `${data.members.length} people`}
+              </Heading>
+              {isMeetup && !isCompleted ? (
+                <Muted>Tap "We met" for anyone you actually talked to. Ending the meetup connects everyone anyway.</Muted>
+              ) : null}
+              {!isMeetup && canMeet && !isCompleted ? (
+                <Muted>Tap "We met" once you've actually hung out — that's what makes them 1st degree.</Muted>
+              ) : null}
+              {data.members.map((member, index) => (
+                <MemberRow
+                  key={member.id ?? `unrevealed-${index}`}
+                  member={member}
+                  index={index}
+                  canMeet={canMeet}
+                  showAcceptance={Boolean(isProposed)}
+                  groupId={id!}
+                  isMeetup={isMeetup}
+                  eventId={data.eventId}
+                />
+              ))}
+            </Card>
+          ) : null}
 
           {isInvited ? (
             <View className="flex-row gap-3">
@@ -444,13 +528,28 @@ export function GroupScreen() {
                 onPress={() => respond.mutate(false)}
               />
               <Button
-                label="Accept"
+                label="I'm in"
                 className="flex-1"
                 loading={respond.isPending && respond.variables === true}
                 onPress={() => respond.mutate(true)}
               />
             </View>
-          ) : (
+          ) : null}
+          {respond.isError ? <Muted>{respond.error.message}</Muted> : null}
+
+          {isWaiting ? (
+            <View className="gap-3 pt-2">
+              <Button
+                label="Never mind, leave"
+                variant="ghost"
+                icon={<LogOut size={16} color="#20201C" />}
+                loading={respond.isPending && respond.variables === false}
+                onPress={() => respond.mutate(false)}
+              />
+            </View>
+          ) : null}
+
+          {!isProposed ? (
             <>
               {isMeetup ? <Icebreakers groupId={id!} prompts={data.icebreakers} /> : null}
 
@@ -473,7 +572,6 @@ export function GroupScreen() {
                   icon={<ImageIcon size={18} color="#20201C" />}
                   onPress={() => router.push(`/groups/${id}/photos`)}
                 />
-                {/* Wave 3: meetups get feedback too — it's the same per-person signal the matcher learns from. */}
                 <Button
                   label="How did it go?"
                   variant="secondary"
@@ -503,7 +601,7 @@ export function GroupScreen() {
                 </View>
               ) : null}
             </>
-          )}
+          ) : null}
         </>
       ) : null}
     </Screen>

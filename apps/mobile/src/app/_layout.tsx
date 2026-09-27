@@ -3,7 +3,8 @@
 // CHANGED Sep 26 (wave 2): the query cache persists to disk (PersistQueryClientProvider), the app refetches on
 // foreground, and the auth/onboarding screens can't be swiped back to from inside the app.
 import '../global.css';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -15,6 +16,7 @@ import {
   PublicSans_600SemiBold,
   PublicSans_700Bold,
 } from '@expo-google-fonts/public-sans';
+import { AnimatedSplash } from '@/components/AnimatedSplash';
 import { AuthGate, useAuthSubscription } from '@/features/auth/session';
 import { persistOptions, queryClient, subscribeQueryFocus } from '@/lib/query';
 import { useSessionStore } from '@/stores/session';
@@ -37,6 +39,8 @@ export default function RootLayout() {
 
   useAuthSubscription();
   const authLoading = useSessionStore((state) => state.authStatus === 'loading');
+  // Wave 4: the animated splash takes over from the (plain paper) native splash and lifts off ~1.5s later.
+  const [splashDone, setSplashDone] = useState(false);
 
   // The splash stays up until the saved session is restored, so no screen renders signed-out first.
   useEffect(() => {
@@ -46,6 +50,7 @@ export default function RootLayout() {
   if (!fontsLoaded || authLoading) return null;
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
       <Stack
         screenOptions={{
@@ -65,6 +70,8 @@ export default function RootLayout() {
       </Stack>
       <AuthGate />
       <StatusBar style="auto" />
+      {!splashDone ? <AnimatedSplash onDone={() => setSplashDone(true)} /> : null}
     </PersistQueryClientProvider>
+    </GestureHandlerRootView>
   );
 }

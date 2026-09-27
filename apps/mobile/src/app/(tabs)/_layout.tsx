@@ -28,8 +28,8 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="circle"
         options={{
-          title: '1st degree',
-          tabBarLabel: '1st degree',
+          title: 'Your circle',
+          tabBarLabel: 'Circle',
           tabBarIcon: ({ color, size }) => <Network color={color} size={size} />,
         }}
       />
@@ -37,7 +37,7 @@ export default function TabsLayout() {
         name="profile"
         options={{
           title: 'Degree 0 (You)',
-          tabBarLabel: 'Degree 0',
+          tabBarLabel: 'You',
           tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
         }}
       />

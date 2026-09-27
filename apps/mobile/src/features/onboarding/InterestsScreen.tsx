@@ -83,9 +83,7 @@ export function InterestsScreen() {
       <Stack.Screen options={{ title: 'Interests', headerBackButtonDisplayMode: 'minimal' }} />
       <Muted>Step 1 of 3</Muted>
       <Text className="mt-2 font-display text-2xl text-ink">What are you into?</Text>
-      <Body className="mt-1 text-muted">
-        Pick a few, or add your own. This is what Degrees matches on when it reaches past your 1st degree.
-      </Body>
+      <Body className="mt-1 text-muted">Pick a few, or add your own. This is what Degrees matches on.</Body>
 
       <View className="mt-4 flex-row items-stretch gap-2">
         <View className="flex-1">

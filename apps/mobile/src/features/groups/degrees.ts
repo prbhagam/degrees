@@ -52,9 +52,9 @@ export function ordinalDegree(degree: number): string {
 // a friend of a friend is 2nd; and so on. Redacted members still show their degree — that's the one thing the
 // design does let you know about someone you haven't met.
 export function memberDegreeLabel(member: Pick<GroupMember, 'degree' | 'revealed' | 'met'>): string {
-  if (member.degree === 0) return 'Degree 0 · you';
-  if (member.degree === 1 || member.met) return '1st degree · met in person';
-  return `${ordinalDegree(member.degree)} · not met yet`;
+  if (member.degree === 0) return 'You';
+  if (member.degree === 1 || member.met) return '1st degree';
+  return `${ordinalDegree(member.degree)} · new`;
 }
 
 export function memberDisplayName(

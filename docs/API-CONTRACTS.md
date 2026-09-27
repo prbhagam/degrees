@@ -8,6 +8,8 @@ This file is what makes four people concurrent. It is implemented as TypeScript 
 
 **CHANGED Sep 26 (wave 3, Sahith's branch `sahith/wave3-testing-fixes`)** — additive: `GroupResponse.activityHistory` (earlier plans, newest first) and `Activity.id`/`createdAt` on saved plans; `POST /api/groups/:id/activity/restore`; `POST /api/groups/:id/leave` on a live meetup now undoes only the connections that meetup created for the leaver (edges with its `event_id`), never pre-existing ones — and a lobby "We met" sends `eventId` so it counts; `GET /api/graph/me` nodes carry `contact` and `POST /api/graph/exchange` is the pair-keyed contact exchange (the per-group `exchange-*` routes stay for compatibility, the app no longer calls them); `GenerateActivityInput` members carry `avoids` and the input carries `previousVenues`. Needs migration `0010`.
 
+**CHANGED Sep 26 (wave 4, branch `sahith/wave4-polish`)** — additive: per-member acceptance (`GroupMember.accepted`, `GroupResponse.myResponse` + `acceptedCount`, `HangoutSummary.needsResponse` + `acceptedCount`; `POST /groups/:id/respond` now records only the caller's answer and the group confirms once everyone has accepted); `PUT /api/groups/:id` renames; "Why this group" text is redacted per viewer so it never names anyone past 1st degree. Needs migration `0011`.
+
 **Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
 **Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
 
@@ -114,7 +116,9 @@ GET  /api/groups/:id
   → { id, status, reasoning, members: GroupMember[], unrevealedCount: number,
       activity: Activity | null, completedAt: string | null,   // CHANGED Sep 26
       kind, name, eventId, hostId, scheduledAt, roomCode, codeExpiresAt, icebreakers: string[],   // Added wave 2
-      activityHistory: Activity[] }   // Added wave 3: earlier 'ready' plans, newest first, current one excluded
+      activityHistory: Activity[],    // Added wave 3: earlier 'ready' plans, newest first, current one excluded
+      myResponse: "pending"|"accepted", acceptedCount: number }   // Added wave 4: per-member acceptance
+  // wave 4: `reasoning` is redacted per viewer — anyone not revealed to the viewer is replaced with "someone new".
   // Meetup members are never redacted (they're in the same room); matched groups keep the rule below.
   // degree and sharedInterests are relative to the viewer (the JWT user)
 
@@ -128,6 +132,7 @@ type GroupMember = {
   sharedInterests: string[];       // kept even when redacted — not identifying on its own
   revealed: boolean;
   met: boolean;                    // Added wave 2: a connections edge exists with the viewer (drives "We met")
+  accepted: boolean;               // Added wave 4: has accepted the proposed group (true in meetups / once confirmed)
   // CHANGED Sep 26: revealed = degree <= 1 OR the group's status is no longer "proposed". Accepting
   // a proposed group is treated as committing to meet, so a still-degree-2 groupmate becomes
   // revealed the moment the group is confirmed — otherwise ChatScreen (which needs a real sender
@@ -141,8 +146,16 @@ type GroupMember = {
 POST /api/groups/:id/respond
   { accept: boolean }
   → { ok: true }
-  // accept: true sets status "confirmed". accept: false removes only the caller from
-  // group_members — other members may still want the hangout.
+  // CHANGED wave 4: accept: true records ONLY the caller's acceptance (group_members.accepted_at); the group's
+  // status flips to "confirmed" when every remaining member has accepted (the requester counts as accepted from
+  // the start). accept: false removes only the caller — others may still want it — and re-checks, so the last
+  // holdout declining can confirm the rest. A group left with one member stays proposed (the app says everyone
+  // else passed). Idempotent.
+
+// Added wave 4: any member can rename a group or meetup (a meetup's events.name follows).
+PUT  /api/groups/:id
+  { name: string }              // 1–60 chars
+  → { ok: true }
 
 // Added Sep 26 — marks the hangout done; starts the 24h chat/photo archive clock.
 // CHANGED wave 2 (team decision): who gets connected depends on the kind. Ending a *meetup* connects every

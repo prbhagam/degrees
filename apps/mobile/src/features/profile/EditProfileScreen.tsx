@@ -145,7 +145,6 @@ export function EditProfileScreen() {
         <Text className="font-body-semibold text-xs text-ember-ink">
           {changePhoto.isPending ? 'Uploading…' : photoUrl ? 'Change photo' : 'Add a photo'}
         </Text>
-        <Muted>Degree 0 — this is what your 1st degree sees.</Muted>
       </Pressable>
       {changePhoto.isError ? <ErrorState message={changePhoto.error.message} /> : null}
 
