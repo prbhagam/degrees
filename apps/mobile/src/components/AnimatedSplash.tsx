@@ -26,10 +26,14 @@ const ringGlyph = require('../../assets/brand/degree-ring.png');
 // native splash is left blank on purpose, see app.json.)
 const MARK_SIZE = 132;
 const ORBIT_MS = 1000;
-const REVEAL_D_MS = 450;
-const REVEAL_GAP_MS = 150;
-const REVEAL_RING_MS = 300;
+const REVEAL_D_MS = 600;
+const REVEAL_GAP_MS = 180;
+const REVEAL_RING_MS = 380;
 const TYPE_HOLD_MS = 400; // lets the cursor blink a couple of times before the mark takes over
+// Stepped, not smooth: a continuous width wipe reads as a swipe, not typing. Snapping through a handful of
+// discrete jumps — like the letter arriving stroke by stroke — is what makes it read as typed.
+const D_STEPS = 5;
+const RING_STEPS = 3;
 
 type Phase = 'typing' | 'graphic';
 
@@ -51,8 +55,11 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
       withSequence(withTiming(1, { duration: 0 }), withDelay(430, withTiming(0, { duration: 0 })), withDelay(430, withTiming(1, { duration: 0 }))),
       -1,
     );
-    dReveal.value = withTiming(1, { duration: REVEAL_D_MS, easing: Easing.out(Easing.cubic) });
-    ringReveal.value = withDelay(REVEAL_D_MS + REVEAL_GAP_MS, withTiming(1, { duration: REVEAL_RING_MS, easing: Easing.out(Easing.cubic) }));
+    dReveal.value = withTiming(1, { duration: REVEAL_D_MS, easing: Easing.steps(D_STEPS, true) });
+    ringReveal.value = withDelay(
+      REVEAL_D_MS + REVEAL_GAP_MS,
+      withTiming(1, { duration: REVEAL_RING_MS, easing: Easing.steps(RING_STEPS, true) }),
+    );
     const t = setTimeout(() => {
       typingOpacity.value = withTiming(0, { duration: 150 });
       setPhase('graphic');

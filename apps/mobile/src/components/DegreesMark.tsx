@@ -74,9 +74,13 @@ const PARK = polarBoxPlain(D_CENTER.x, D_CENTER.y, ORBIT_R, PARK_ANGLE, RING_SIZ
 const D_SHRUNK = { left: PARK.left, top: PARK.top, width: RING_SIZE, height: RING_SIZE };
 const RING_GROWN = { left: D_CENTER.x - D_POSE.height / 2, top: D_CENTER.y - D_POSE.height / 2, width: D_POSE.height, height: D_POSE.height };
 
-const MORPH_MS = 550;
+const MORPH_MS = 900;
 const SETTLE_MS = 400;
 const EASE = Easing.inOut(Easing.cubic);
+// The destination shape doesn't start fading in until the departing shape is already well underway — sharing
+// the same timeline start would let the two cancel out visually (identical pixels crossfading at the same spot
+// reads as "nothing moved"). This gives the departure a clear head start before the arrival catches up.
+const STABLE_DELAY = 0.4;
 
 export function DegreesMark({
   size = 48,
@@ -117,10 +121,19 @@ export function DegreesMark({
     'worklet';
     return frac * size;
   };
-  // Eased, clamped progress through the morph (0..1) — held at 0 before it starts, at 1 after it ends.
+  // Raw (unstaggered), eased progress through the morph (0..1) — held at 0 before it starts, at 1 after it ends.
+  // Drives the departing (transitional) shapes: they move and fade across the FULL morph, so the motion reads
+  // clearly before anything else shows up on top of it.
   const morphT = () => {
     'worklet';
     return EASE(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
+  };
+  // The arriving (stable) shapes' progress: the same morph window, but starting STABLE_DELAY late, so they only
+  // begin fading in once the departure is already visibly underway.
+  const stableT = () => {
+    'worklet';
+    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
+    return EASE(interpolate(raw, [STABLE_DELAY, 1], [0, 1], Extrapolation.CLAMP));
   };
 
   // Transitional element: box + opacity driven by the same eased morph progress, fading OUT as it travels from
@@ -137,14 +150,14 @@ export function DegreesMark({
         opacity: 1 - t,
       };
     });
-  const fadeInStyle = useAnimatedStyle(() => ({ opacity: morphT() }));
+  const fadeInStyle = useAnimatedStyle(() => ({ opacity: stableT() }));
 
-  // The stable ring: fades in ember at PARK during the morph, then sweeps halfway to its resting spot.
+  // The stable ring: fades in ember at PARK partway through the morph, then sweeps halfway to its resting spot.
   const ringOrbitStyle = useAnimatedStyle(() => {
     const orbitT = EASE(interpolate(master.value, [mMorph, mOrbit], [0, 1], Extrapolation.CLAMP));
     const angle = PARK_ANGLE - 180 * orbitT;
     const box = polarBox(px(D_CENTER.x), px(D_CENTER.y), px(ORBIT_R), angle, px(RING_SIZE));
-    return { position: 'absolute', ...box, opacity: morphT() };
+    return { position: 'absolute', ...box, opacity: stableT() };
   });
 
   const dShrinkingStyle = useTransitionalStyle(D_POSE, D_SHRUNK);
