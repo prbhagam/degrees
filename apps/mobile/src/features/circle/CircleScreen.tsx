@@ -200,6 +200,7 @@ export function CircleScreen() {
             selectedId={selectedId}
             onSelect={setSelectedId}
             onBump={(name) => setBumped((current) => ({ name, count: (current?.count ?? 0) + 1 }))}
+            mePhotoUrl={me.data?.photoUrl ?? null}
           />
           <View className="mt-2 min-h-10 items-center">
             {nodes.length === 0 ? (

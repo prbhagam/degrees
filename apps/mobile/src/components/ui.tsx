@@ -202,10 +202,14 @@ export function Avatar({
         ? 'border-2 border-dashed border-line bg-paper'
         : 'bg-sage';
   const textColor = tone === 'you' || (!locked && tone === 'met') ? 'text-paper' : 'text-muted';
-  if (!locked && photoUrl) {
+  // CHANGED Sep 27 (Sahith): a photo that fails to load (stale URL, offline) falls back to initials instead of
+  // leaving an empty circle.
+  const [failed, setFailed] = useState(false);
+  if (!locked && photoUrl && !failed) {
     return (
       <Image
         source={{ uri: photoUrl }}
+        onError={() => setFailed(true)}
         className={`${box} rounded-full`}
         accessibilityLabel={name}
       />
