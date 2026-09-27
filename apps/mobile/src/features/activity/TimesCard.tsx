@@ -2,10 +2,13 @@
 // moved here from Host a meetup. Anyone proposes a time, everyone says which they're free for, and any member
 // locks one in (groups.scheduled_at). Times are per group, so this shows whether or not a plan exists yet, and
 // the group can talk it through in chat. Realtime on group_times/group_time_votes (useGroup) keeps it live.
-import DateTimePicker, { type DateTimePickerChangeEvent } from '@react-native-community/datetimepicker';
+// CHANGED Sep 27 (Sahith): a plan for a real event (a game, a show — `activity.startsAt`) has a hard date, so the
+// server locks the event's start in as the group's time (syncEventTime) and this card shows it as fixed: no
+// proposing or locking other times, just "I can make it". The picker is WhenPicker (day chips + calendar, time chips
+// + wheel), replacing a single datetime spinner that clipped and ignored the app's colours.
 import type { GroupResponse, TimeSlot, TimesResponse } from '@degrees/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { addMinutes, format, parseISO } from 'date-fns';
+import { format, parseISO } from 'date-fns';
 import { useRouter } from 'expo-router';
 import { CalendarClock, Check, Lock, MessageCircle, Trash2 } from 'lucide-react-native';
 import { useState } from 'react';
@@ -14,15 +17,7 @@ import { Button, Card, Field, Heading, Muted } from '@/components/ui';
 import { firstName } from '@/features/groups/degrees';
 import { queryKeys, useMe } from '@/features/groups/queries';
 import { api } from '@/lib/api';
-
-// Round "now" up to the next quarter hour for a sensible default.
-function nextQuarterHour(): Date {
-  const now = new Date();
-  const remainder = 15 - (now.getMinutes() % 15);
-  const rounded = addMinutes(now, remainder);
-  rounded.setSeconds(0, 0);
-  return rounded;
-}
+import { nextQuarterHour, WhenPicker } from './WhenPicker';
 
 const formatSlot = (iso: string) => format(parseISO(iso), 'EEE, MMM d · h:mm a');
 
@@ -33,10 +28,12 @@ function TimeRow({
   onVote,
   onChoose,
   onDelete,
+  fixed = false,
 }: {
   slot: TimeSlot;
   mine: boolean;
   busy: boolean;
+  fixed?: boolean;
   onVote: (available: boolean) => void;
   onChoose: () => void;
   onDelete: () => void;
@@ -50,7 +47,7 @@ function TimeRow({
             {slot.chosen ? <Check size={16} color="#5B7A6B" /> : null}
             <Text className="font-body-semibold text-base text-ink">{formatSlot(slot.startsAt)}</Text>
           </View>
-          {slot.note ? <Muted>{slot.note}</Muted> : null}
+          {slot.note && !slot.fromEvent ? <Muted>{slot.note}</Muted> : null}
           <Muted>{free.length > 0 ? `Free: ${free.join(', ')}` : 'Nobody yet'}</Muted>
         </View>
         {mine && !slot.chosen ? (
@@ -68,20 +65,20 @@ function TimeRow({
       </View>
       <View className="flex-row gap-2">
         <Button
-          label={slot.imAvailable ? 'Free ✓' : "I'm free"}
+          label={fixed ? (slot.imAvailable ? "I'm in ✓" : 'I can make it') : slot.imAvailable ? 'Free ✓' : "I'm free"}
           variant={slot.imAvailable ? 'primary' : 'secondary'}
           className="min-h-9 flex-1 py-1.5"
           disabled={busy}
           onPress={() => onVote(!slot.imAvailable)}
         />
-        <Button
+        {fixed ? null : <Button
           label={slot.chosen ? 'Locked in' : 'Lock in'}
           variant="ghost"
           className="min-h-9 flex-1 py-1.5"
           icon={<Lock size={14} color="#20201C" />}
           disabled={busy || slot.chosen}
           onPress={onChoose}
-        />
+        />}
       </View>
     </View>
   );
@@ -137,10 +134,12 @@ export function TimesCard({ groupId, group }: { groupId: string; group: GroupRes
     ]);
   };
 
-  // datetimepicker 9: onChange is deprecated in favour of onValueChange (a date, always) + onDismiss.
-  const onPick = (_event: DateTimePickerChangeEvent, date: Date) => setWhen(date);
-
   const times = [...group.times].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+  // The plan is a real event with a future start: that's the time, full stop.
+  const eventStart =
+    group.activity?.startsAt && new Date(group.activity.startsAt).getTime() > Date.now() ? group.activity.startsAt : null;
+  const eventSlot = eventStart ? times.find((slot) => slot.fromEvent || slot.chosen) : undefined;
+  const inPast = when.getTime() <= Date.now();
 
   return (
     <Card>
@@ -148,13 +147,29 @@ export function TimesCard({ groupId, group }: { groupId: string; group: GroupRes
         <CalendarClock size={16} color="#5B7A6B" />
         <Heading>When</Heading>
       </View>
-      {group.scheduledAt ? (
+      {eventStart ? (
+        <>
+          <Text className="font-body-semibold text-base text-ink">Set by the event · {formatSlot(eventStart)}</Text>
+          <Muted>This plan is a real event, so its start time is locked in for everyone. Say whether you can make it.</Muted>
+          {eventSlot ? (
+            <TimeRow
+              slot={eventSlot}
+              mine={false}
+              busy={busy}
+              fixed
+              onVote={(available) => vote.mutate({ timeId: eventSlot.id, available })}
+              onChoose={() => undefined}
+              onDelete={() => undefined}
+            />
+          ) : null}
+        </>
+      ) : group.scheduledAt ? (
         <Text className="font-body-semibold text-base text-ink">Locked in · {formatSlot(group.scheduledAt)}</Text>
       ) : (
         <Muted>No time yet. Propose one, and everyone marks the ones they're free for.</Muted>
       )}
 
-      {times.map((slot) => (
+      {eventStart ? null : times.map((slot) => (
         <TimeRow
           key={slot.id}
           slot={slot}
@@ -166,23 +181,21 @@ export function TimesCard({ groupId, group }: { groupId: string; group: GroupRes
         />
       ))}
 
-      {proposing ? (
-        <View className="gap-3">
-          <View className="items-center rounded-m border border-line bg-paper py-2">
-            <DateTimePicker
-              value={when}
-              mode="datetime"
-              display="spinner"
-              minuteInterval={15}
-              minimumDate={new Date()}
-              onValueChange={onPick}
-            />
-          </View>
+      {eventStart ? null : proposing ? (
+        <View className="gap-3 border-t border-line pt-3">
+          <WhenPicker value={when} onChange={setWhen} />
           <Field label="Note (optional)" value={note} onChangeText={setNote} placeholder="e.g. after class" maxLength={120} />
           <View className="flex-row gap-2">
             <Button label="Cancel" variant="ghost" className="flex-1" onPress={() => setProposing(false)} />
-            <Button label="Propose" className="flex-1" loading={propose.isPending} onPress={() => propose.mutate()} />
+            <Button
+              label="Propose"
+              className="flex-1"
+              loading={propose.isPending}
+              disabled={inPast}
+              onPress={() => propose.mutate()}
+            />
           </View>
+          {inPast ? <Muted>That time has already passed. Pick a later one.</Muted> : null}
         </View>
       ) : (
         <Button label="Propose a time" variant="secondary" onPress={() => setProposing(true)} />

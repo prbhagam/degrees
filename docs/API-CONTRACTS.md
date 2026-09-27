@@ -240,6 +240,11 @@ POST /api/groups/:id/activity/restore
 // meetup's events.scheduled_at), shown on Home and the group screen, and everyone else gets event_changed
 // { change: "time" }. Every route returns the full list. Membership required; 403 hangout_archived once
 // completedAt + 24h has passed.
+// Added Sep 27: when the current plan is a real event (Activity.startsAt in the future — a Ticketmaster game or show),
+// the server locks its start in automatically whenever that plan becomes current (generated or restored): an
+// event-owned slot (fromEvent, no proposer) that is the group's scheduledAt. While it stands, proposing a time or
+// choosing a member's time is 409 event_time_fixed; voting on the event slot ("I can make it") still works.
+// Switching to a plan with no fixed time removes the event slot and unschedules the group if that was the time.
 POST   /api/groups/:id/times
   { startsAt: string, note?: string }   // ISO 8601; rounded to the minute; idempotent on (group, minute)
   → { times: TimeSlot[] }               // the proposer is automatically free for their own time
@@ -254,6 +259,7 @@ type TimeSlot = {
   id: string; startsAt: string; note: string | null;
   proposedById: string; proposedByName: string;
   availableIds: string[]; availableNames: string[];   // everyone who said they're free
+  fromEvent: boolean;                                   // Added Sep 27 — the plan's real event start (proposedById '')
   imAvailable: boolean;                               // the viewer's own answer
   chosen: boolean;                                    // the locked-in one (== GroupResponse.scheduledAt)
 }

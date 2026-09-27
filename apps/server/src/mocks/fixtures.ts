@@ -173,6 +173,13 @@ export const icebreakersFixture = {
   ],
 } satisfies IcebreakersResponse;
 
+// A fixed local time two weeks from today, for mock event plans.
+function twoWeeksOutAt(hours: number, minutes: number): string {
+  const at = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+  at.setHours(hours, minutes, 0, 0);
+  return at.toISOString();
+}
+
 export const activityFixture = {
   title: 'Duckpin Bowling and Food Hall Hangout',
   venue: 'The Painted Duck',
@@ -180,7 +187,9 @@ export const activityFixture = {
   lat: 33.7817,
   lng: -84.4124,
   priceCents: 2500,
-  startsAt: '2026-09-27T23:00:00.000Z',
+  // CHANGED Sep 27: null. A venue has no start time; only a real event does, and a start here would lock a fake time
+  // onto the group (syncEventTime) — this is also the real-mode last-resort plan.
+  startsAt: null,
   source: 'maps',
   sourceUrl: 'https://maps.google.com/?q=The+Painted+Duck+Atlanta',
   reasoning:
@@ -316,6 +325,21 @@ export const groupFixture = {
       sourceUrl: 'https://maps.google.com/?q=Stone+Summit+Midtown',
       reasoning: 'Avery and Leo both boulder, and the taqueria next door keeps it cheap.',
     },
+    // Sep 27: a real event two weeks out, so "Use this plan" shows the event's start locking in as the group's time.
+    {
+      id: 'mock-activity-event',
+      createdAt: '2026-09-26T17:00:00.000Z',
+      title: 'Georgia Tech home game',
+      venue: 'Bobby Dodd Stadium',
+      address: '177 North Ave NW, Atlanta, GA 30332',
+      lat: 33.7724,
+      lng: -84.3928,
+      priceCents: 2500,
+      startsAt: twoWeeksOutAt(19, 30),
+      source: 'ticketmaster',
+      sourceUrl: 'https://www.ticketmaster.com/',
+      reasoning: 'Everyone listed college football, and student tickets fit the budget.',
+    },
   ],
   completedAt: null,
   kind: 'matched',
@@ -348,6 +372,7 @@ export function timesFixture(now = Date.now()): TimeSlot[] {
       availableNames: ['Maya Patel', 'Jordan Kim'],
       imAvailable: false,
       chosen: false,
+      fromEvent: false,
     },
   ];
 }

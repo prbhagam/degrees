@@ -279,6 +279,9 @@ export interface TimeSlot {
   availableNames: string[];
   imAvailable: boolean;
   chosen: boolean;
+  // Added Sep 27: the start time of the plan's real event (a game, a show). Set by the server, not a member; while that
+  // plan is current it's the group's locked-in time and nobody can propose or lock another.
+  fromEvent: boolean;
 }
 
 export interface TimesResponse {
