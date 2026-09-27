@@ -21,6 +21,7 @@ import type {
   restoreActivityRequestSchema,
   sendMessageRequestSchema,
   signupRequestSchema,
+  loginRequestSchema,
   updatePreferencesRequestSchema,
   extractTagsOutputSchema,
   extractTagsRequestSchema,
@@ -93,6 +94,7 @@ export type CreateConnectionRequest = z.infer<
 export type SendMessageRequest = z.infer<typeof sendMessageRequestSchema>;
 export type FeedbackRequest = z.infer<typeof feedbackRequestSchema>;
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
+export type LoginRequest = z.input<typeof loginRequestSchema>;
 export type CreateEventRequest = z.infer<typeof createEventRequestSchema>;
 export type ExchangeRequest = z.infer<typeof exchangeRequestSchema>;
 export type RespondRequest = z.infer<typeof respondRequestSchema>;
@@ -110,6 +112,12 @@ export interface OkResponse {
 // Added Sep 26 — POST /api/auth/signup. The client signs in with the password right after.
 export interface SignupResponse extends OkResponse {
   userId: string;
+}
+
+// Added Sep 27 — POST /api/auth/login. The client hands these to supabase.auth.setSession.
+export interface LoginResponse {
+  accessToken: string;
+  refreshToken: string;
 }
 
 export interface CreateConnectionResponse extends OkResponse {

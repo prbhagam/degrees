@@ -30,6 +30,8 @@ import type {
   SendMessageResponse,
   SignupRequest,
   SignupResponse,
+  LoginRequest,
+  LoginResponse,
   TimesResponse,
   TimeVoteRequest,
   UpdateNotificationSettingsRequest,
@@ -162,6 +164,11 @@ const json = (method: string, body: unknown): RequestInit => ({
 const groupPath = (id: string) => `/api/groups/${encodeURIComponent(id)}`;
 
 export const api = {
+  // Added Sep 27: username login (email logins go straight to Supabase).
+  login: (body: LoginRequest) =>
+    request<LoginResponse>('/api/auth/login', json('POST', body), {
+      authenticated: false,
+    }),
   signup: (body: SignupRequest) =>
     request<SignupResponse>('/api/auth/signup', json('POST', body), {
       authenticated: false,
