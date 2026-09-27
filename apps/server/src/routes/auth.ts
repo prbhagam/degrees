@@ -1,11 +1,13 @@
 // Owner: Christian (Server & Infra) — see docs/ROLES.md. Signup added by Sahith (Sep 26).
 // Public (mounted before requireAuth). Signup lives on the server because the shared Supabase project
-// requires email confirmation, which `<username>@degrees.demo` addresses can never complete, and because
-// nothing else creates a new user's `profiles` row. The service role creates the auth user already
-// confirmed, then the profile row; the app signs in with the password right after.
+// requires email confirmation, whose built-in mailer is rate-limited, and because nothing else creates a new
+// user's `profiles` row. The service role creates the auth user already confirmed, then the profile row; the app
+// signs in with the email + password right after.
+// CHANGED Sep 27: the auth email is the person's real email (it used to be `<username>@degrees.demo`). The
+// username is still collected and unique, as the @handle. `@degrees.demo` is reserved for the seeded demo
+// accounts (signupEmailSchema rejects it), so supabase/scripts/purge_demo_users.sql can find them by domain.
 import { Hono } from 'hono';
 import {
-  authEmailFor,
   signupRequestSchema,
   type SignupResponse,
 } from '@degrees/shared';
@@ -17,6 +19,8 @@ import { REQUESTER_ID } from '../mocks/fixtures.js';
 
 const usernameTaken = () =>
   new ApiError(409, 'username_taken', 'That username is taken.');
+const emailTaken = () =>
+  new ApiError(409, 'email_taken', 'An account with that email already exists. Try logging in.');
 
 export const authRoutes = new Hono<AppEnv>().post(
   '/auth/signup',
@@ -42,14 +46,14 @@ export const authRoutes = new Hono<AppEnv>().post(
     }
 
     const { data: created, error: createError } = await db.auth.admin.createUser({
-      email: authEmailFor(request.username),
+      email: request.email,
       password: request.password,
       email_confirm: true,
       user_metadata: { username: request.username },
     });
     if (createError || !created.user) {
       if (createError?.code === 'email_exists' || /already/i.test(createError?.message ?? '')) {
-        throw usernameTaken();
+        throw emailTaken();
       }
       if (createError?.code === 'weak_password') {
         throw new ApiError(400, 'invalid_request', createError.message);

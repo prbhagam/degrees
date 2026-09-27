@@ -25,9 +25,26 @@ export const connectionContextSchema = z.enum([
 export const activitySourceSchema = z.enum(['maps', 'ticketmaster']);
 export const sentimentSchema = z.enum(['positive', 'neutral', 'negative']);
 
-// Added Sep 26 — server-side signup. Supabase Auth runs on email + password; people sign in with a username,
-// which maps to `<username>@degrees.demo` (PRD rule 9, and how the seeded demo logins work).
-export const AUTH_EMAIL_DOMAIN = 'degrees.demo';
+// Added Sep 26 — server-side signup. CHANGED Sep 27: people sign up and log in with their real email, which is the
+// Supabase auth email as-is. The username stays as the @handle shown in the app, not a login.
+// `degrees.demo` is reserved for the seeded demo accounts, so `supabase/scripts/purge_demo_users.sql` can remove
+// every one of them (and nothing else) with a single domain match. Signup refuses it.
+export const DEMO_EMAIL_DOMAIN = 'degrees.demo';
+
+export function isDemoEmail(email: string): boolean {
+  return email.trim().toLowerCase().endsWith(`@${DEMO_EMAIL_DOMAIN}`);
+}
+
+export const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.email('Enter a valid email address.'));
+
+export const signupEmailSchema = emailSchema.refine(
+  (email) => !isDemoEmail(email),
+  `@${DEMO_EMAIL_DOMAIN} addresses are reserved for demo accounts.`,
+);
 
 export const usernameSchema = z
   .string()
@@ -37,12 +54,6 @@ export const usernameSchema = z
     /^[a-z0-9._]{3,20}$/,
     'Usernames are 3–20 characters: lowercase letters, numbers, dots, or underscores.',
   );
-
-// A username becomes its auth email; anything already containing "@" is used as-is (older accounts).
-export function authEmailFor(usernameOrEmail: string): string {
-  const value = usernameOrEmail.trim().toLowerCase();
-  return value.includes('@') ? value : `${value}@${AUTH_EMAIL_DOMAIN}`;
-}
 
 // ---- Phone numbers (Added Sep 26, wave 2): US only for now ------------------------------------
 // Stored as E.164 (+1XXXXXXXXXX); shown as (404) 555-0148. Both apps format with these so the server never
@@ -85,6 +96,7 @@ export const usPhoneSchema = z
   });
 
 export const signupRequestSchema = z.object({
+  email: signupEmailSchema,
   username: usernameSchema,
   password: z.string().min(8, 'Passwords need at least 8 characters.'),
   displayName: z.string().trim().min(1, 'Add your name.'),

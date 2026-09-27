@@ -1,6 +1,6 @@
 // Owner: Sahith (Data & Matching) — run: npx tsx apps/server/src/routes/auth.test.ts (no network).
 import assert from 'node:assert/strict';
-import { authEmailFor, signupRequestSchema, usernameSchema } from '@degrees/shared';
+import { emailSchema, isDemoEmail, signupRequestSchema, usernameSchema } from '@degrees/shared';
 
 let failures = 0;
 function test(name: string, run: () => void) {
@@ -13,10 +13,18 @@ function test(name: string, run: () => void) {
   }
 }
 
-test('authEmailFor maps a username to its demo email, and leaves emails alone', () => {
-  assert.equal(authEmailFor('maya.chen'), 'maya.chen@degrees.demo');
-  assert.equal(authEmailFor('  Maya.Chen '), 'maya.chen@degrees.demo');
-  assert.equal(authEmailFor('Someone@Example.com'), 'someone@example.com');
+test('emailSchema trims and lowercases, and rejects non-emails (a bare username no longer logs in)', () => {
+  assert.equal(emailSchema.parse('  Someone@Example.com '), 'someone@example.com');
+  for (const bad of ['maya.chen', 'no-at-sign.com', 'a@', '@b.com', '']) {
+    assert.equal(emailSchema.safeParse(bad).success, false, bad);
+  }
+});
+
+test('isDemoEmail matches only the reserved demo domain', () => {
+  assert.equal(isDemoEmail('maya.chen@degrees.demo'), true);
+  assert.equal(isDemoEmail(' Maya.Chen@DEGREES.demo '), true);
+  assert.equal(isDemoEmail('maya@gatech.edu'), false);
+  assert.equal(isDemoEmail('maya@notdegrees.demo'), false);
 });
 
 test('usernameSchema lowercases and trims, and enforces 3–20 of [a-z0-9._]', () => {
@@ -26,9 +34,19 @@ test('usernameSchema lowercases and trims, and enforces 3–20 of [a-z0-9._]', (
   }
 });
 
-test('signupRequestSchema requires name, phone, and an 8+ character password', () => {
-  const good = { username: 'alex', password: 'longenough', displayName: 'Alex', phone: '4045550100' };
-  assert.equal(signupRequestSchema.safeParse(good).success, true);
+test('signupRequestSchema requires a real (non-demo) email, name, phone, and an 8+ character password', () => {
+  const good = {
+    email: 'Alex@GaTech.edu',
+    username: 'alex',
+    password: 'longenough',
+    displayName: 'Alex',
+    phone: '4045550100',
+  };
+  const parsed = signupRequestSchema.safeParse(good);
+  assert.equal(parsed.success, true);
+  assert.equal(parsed.data?.email, 'alex@gatech.edu');
+  assert.equal(signupRequestSchema.safeParse({ ...good, email: 'alex' }).success, false);
+  assert.equal(signupRequestSchema.safeParse({ ...good, email: 'alex@degrees.demo' }).success, false);
   assert.equal(signupRequestSchema.safeParse({ ...good, password: 'short' }).success, false);
   assert.equal(signupRequestSchema.safeParse({ ...good, displayName: '  ' }).success, false);
   assert.equal(signupRequestSchema.safeParse({ ...good, phone: '' }).success, false);

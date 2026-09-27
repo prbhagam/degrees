@@ -1,8 +1,10 @@
-// Owner: Charles (Onboarding & Profile) — see docs/ROLES.md. Username signup via the server wired by Sahith (Sep 26).
+// Owner: Charles (Onboarding & Profile) — see docs/ROLES.md. Signup via the server wired by Sahith (Sep 26).
+// CHANGED Sep 27: signup collects a real email (the login) alongside the username (the @handle); the account's
+// auth email is that address, no longer `<username>@degrees.demo`.
 // CHANGED Sep 26 (wave 2): phone formats as (404) 555-0148 while typing (US only for now), password has a
 // show/hide toggle (Field), and onboarding is entered with replace so it isn't left under the app.
 import { useState } from 'react';
-import { authEmailFor, formatUsPhone, signupRequestSchema } from '@degrees/shared';
+import { formatUsPhone, signupRequestSchema } from '@degrees/shared';
 import { useMutation } from '@tanstack/react-query';
 import { Link, Stack, useRouter } from 'expo-router';
 import { Text, View } from 'react-native';
@@ -19,6 +21,7 @@ export function SignupScreen() {
   const setOnboardingSkippedBy = useSessionStore((state) => state.setOnboardingSkippedBy);
   const [name, setName] = useState('');
   const [pronoun, setPronoun] = useState<string | null>(null);
+  const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -26,6 +29,7 @@ export function SignupScreen() {
   const signup = useMutation({
     mutationFn: async () => {
       const parsed = signupRequestSchema.safeParse({
+        email,
         username,
         password,
         displayName: name,
@@ -40,7 +44,7 @@ export function SignupScreen() {
       await api.signup(parsed.data);
       if (!isSupabaseEnvironmentUnset()) {
         const { error } = await getSupabaseClient().auth.signInWithPassword({
-          email: authEmailFor(parsed.data.username),
+          email: parsed.data.email,
           password,
         });
         if (error) throw new Error(error.message);
@@ -80,8 +84,20 @@ export function SignupScreen() {
         </View>
 
         <Field
+          label="Email"
+          hint="What you'll log in with."
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
+          keyboardType="email-address"
+          textContentType="emailAddress"
+          placeholder="alex@example.com"
+        />
+        <Field
           label="Username"
-          hint="What you'll log in with. Lowercase letters, numbers, dots, underscores."
+          hint="How friends see you, as @username. Lowercase letters, numbers, dots, underscores."
           value={username}
           onChangeText={setUsername}
           autoCapitalize="none"
@@ -114,7 +130,7 @@ export function SignupScreen() {
         label="Continue"
         className="mt-6"
         loading={signup.isPending}
-        disabled={!name || !phone || !username || !password}
+        disabled={!name || !email || !phone || !username || !password}
         onPress={() => signup.mutate()}
       />
 

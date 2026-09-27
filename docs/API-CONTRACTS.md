@@ -20,15 +20,16 @@ This file is what makes four people concurrent. It is implemented as TypeScript 
 ```ts
 // ---- Auth (Added Sep 26) ---------------------------------------------------
 POST /api/auth/signup            // PUBLIC — no Authorization header
-  { username, password, displayName, phone, pronouns? }
+  { email, username, password, displayName, phone, pronouns? }     // CHANGED Sep 27: + email
   → { ok: true, userId }
-  // username: 3–20 of [a-z0-9._], lowercased server-side. password: 8+ chars.
-  // The server creates the Supabase auth user already confirmed, as `<username>@degrees.demo`,
-  // plus the profiles row. The client then signs in with supabase.auth.signInWithPassword using
-  // authEmailFor(username) from @degrees/shared. Login is the same call — there is no login route.
-  // 409 username_taken · 400 invalid_request
-  // Why server-side: the Supabase project requires email confirmation, which a @degrees.demo
-  // address can never complete, and nothing else creates a new user's profiles row.
+  // email: trimmed + lowercased; @degrees.demo is rejected (reserved for seeded demo accounts).
+  // username: 3–20 of [a-z0-9._], lowercased server-side — the @handle, not a login. password: 8+ chars.
+  // The server creates the Supabase auth user already confirmed, with that email, plus the profiles
+  // row. The client then signs in with supabase.auth.signInWithPassword({ email, password }). Login
+  // is the same call — there is no login route.
+  // 409 username_taken · 409 email_taken · 400 invalid_request
+  // Why server-side: the Supabase project requires email confirmation (rate-limited mailer; the
+  // email isn't verified by us yet), and nothing else creates a new user's profiles row.
 
 // ---- Profile & preferences ------------------------------------------------
 GET  /api/me

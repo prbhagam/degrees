@@ -27,8 +27,11 @@ migrations/0010_plan_history_realtime_contacts.sql  wave 3 (Sahith): activities.
 migrations/0011_member_acceptance.sql    wave 4 (Sahith): group_members.accepted_at (per-member accept; backfilled for meetups,
                                          confirmed/completed groups, and requesters), match_create_group redefined to create the
                                          requester already accepted. Idempotent..
+scripts/purge_demo_users.sql             removes every @degrees.demo account and its data: a real environment on demand
+scripts/restore_demo_users.sql           brings the 60 seeded demo accounts back (0002's 12 on the 0011 schema + 48 more); re-runnable
 seed/seed.ts                             replaces 0002's placeholder vectors with real Gemini embeddings (`npm run seed`)
 tests/run-local.sh + matching.sql + privacy.sql   0001 + 0003–0011 on a throwaway local Postgres (with a storage shim) and assertions
+tests/demo_accounts.sql                  restore → purge → restore on a second fresh database, with real accounts mixed in
 tsconfig.json                            lets `npm run typecheck` cover seed.ts
 ```
 
@@ -65,7 +68,14 @@ To test locally without the Supabase CLI, apply the migration to a throwaway Pos
 2. `npm run seed` — re-embeds every profile with Gemini (`gemini-embedding-001`, 768 dims, `SEMANTIC_SIMILARITY`).
    Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY` in the root `.env`. Safe to rerun.
 
-Demo logins are `<username>@degrees.demo` / `DegreesDemo26!`. New accounts are created by the server's `POST /api/auth/signup` (service role): a confirmed auth user as `<username>@degrees.demo` plus its `profiles` row, in one request. There's no `auth.users` trigger, so a user created any other way (e.g. the dashboard) has no profile row until one is inserted. **The project has "Confirm email" on**, and its built-in mailer is rate-limited: client-side `auth.signUp` fails with `over_email_send_rate_limit`, and `@degrees.demo` can't receive mail anyway. Server-side signup bypasses both.
+Demo logins are `<username>@degrees.demo` / `DegreesDemo26!` (e.g. `maya.chen@degrees.demo`), typed in full on the login screen. New accounts are created by the server's `POST /api/auth/signup` (service role): a confirmed auth user **with the person's real email** (Sep 27; it used to be `<username>@degrees.demo`) plus its `profiles` row, in one request. There's no `auth.users` trigger, so a user created any other way (e.g. the dashboard) has no profile row until one is inserted. **The project has "Confirm email" on**, and its built-in mailer is rate-limited: client-side `auth.signUp` fails with `over_email_send_rate_limit`. Server-side signup bypasses that (so emails aren't verified yet).
+
+## Demo accounts: prod vs testing
+
+`@degrees.demo` is reserved for the seeded demo accounts — signup rejects it — so the domain alone identifies them. Both scripts need `0010` + `0011` applied (they refuse otherwise), run in the SQL Editor as one DO block (all-or-nothing), and end with a verification `select`.
+
+- **Go prod:** run `scripts/purge_demo_users.sql`. It removes every `@degrees.demo` auth user and their profile, tags, embedding, preferences, memberships, messages, feedback, contacts, and connections; groups and meetups they hosted (HACKGT); and groups left with no real member (meetups) or fewer than two (matched). Real-to-real edges survive (an edge made at a deleted meetup loses only its `event_id`); a proposed group whose only unanswered member was a demo account confirms (wave-4 rule). Set `v_dry_run := true` at the top to preview counts. **Storage files aren't removed** (deleting `storage.objects` rows from SQL wouldn't delete the files); the notice counts them for the dashboard. Every account made before the Sep 27 email change is also `@degrees.demo` and goes too; only the 60 seeded ones come back.
+- **Back to testing:** run `scripts/restore_demo_users.sql`, then `npm run seed` for real embeddings. It recreates 60 accounts with fixed ids: 0002's 12 (graph, two completed groups with feedback, an always-open HACKGT meetup) plus 48 more (added Sep 27) across GT, Georgia State, Emory, SCAD Atlanta, Agnes Scott, and the AUC in eight friend circles, 10 of them with an avoid tag, and 2 with no connections yet. Each circle bridges onto someone 2nd-degree from Maya, so her default 2-degree demo is unchanged and her 3-degree slider reaches them. It leaves real accounts alone. It refuses, changing nothing, if a real account has since taken a seeded username or the HACKGT code.
 
 ## Seed requirements (from DATA-MODEL.md)
 
