@@ -35,7 +35,10 @@ type Phase = 'typing' | 'graphic';
 
 export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   const [phase, setPhase] = useState<Phase>('typing');
-  const px = (frac: number) => frac * MARK_SIZE;
+  const px = (frac: number) => {
+    'worklet';
+    return frac * MARK_SIZE;
+  };
 
   const dReveal = useSharedValue(0); // 0..1
   const ringReveal = useSharedValue(0); // 0..1
