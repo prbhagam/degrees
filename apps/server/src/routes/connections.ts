@@ -9,11 +9,12 @@ import {
   type CreateConnectionResponse,
   type ExchangeResponse,
   type GraphResponse,
+  type ReachResponse,
 } from '@degrees/shared';
 import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError, validateJson } from '../lib/errors.js';
-import { displayNames, exploreFrom, profileBasics } from '../lib/graph.js';
+import { displayNames, exploreFrom, profileBasics, reachSummary } from '../lib/graph.js';
 import { notify } from '../lib/notify.js';
 import type { AppEnv } from '../middleware/auth.js';
 import { graphFixture } from '../mocks/fixtures.js';
@@ -196,6 +197,26 @@ export const connectionRoutes = new Hono<AppEnv>()
         .map(({ a, b }) => ({ a, b })),
       mutualEdges: mutualRows.map(({ user_a, user_b }) => ({ a: user_a, b: user_b })),
     } satisfies GraphResponse;
+    return context.json(response);
+  })
+  // Added Sep 27 (wave 6): how many people each degree setting reaches (counts only), for the preferences dial.
+  .get('/graph/reach', async (context) => {
+    if (env.mockMode) {
+      const response = {
+        mine: [
+          { degree: 1, people: graphFixture.nodes.length },
+          { degree: 2, people: 9 },
+          { degree: 3, people: 24 },
+        ],
+        typical: [
+          { degree: 1, people: 3 },
+          { degree: 2, people: 11 },
+          { degree: 3, people: 30 },
+        ],
+      } satisfies ReachResponse;
+      return context.json(response);
+    }
+    const response = (await reachSummary(context.get('userId'))) satisfies ReachResponse;
     return context.json(response);
   })
   // Added Sep 26 (wave 3): mutual-consent phone exchange with someone in your circle. Moved out of the per-group

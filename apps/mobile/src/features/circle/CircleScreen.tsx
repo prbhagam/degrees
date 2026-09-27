@@ -6,6 +6,7 @@
 // CHANGED Sep 26 (wave 5, Sahith): Play folded into Map. The map is now the physics graph (CircleGraph.tsx): drag
 // anyone, fling them, watch the people who know each other pull together and the rest get pushed aside; tap to
 // select. The static SVG map and the separate Play toggle are gone.
+// CHANGED Sep 27 (wave 6, Sahith): everyone holds their spot and only you move (CircleGraph); copy to match.
 import { useState } from 'react';
 import { Stack } from 'expo-router';
 import * as Linking from 'expo-linking';
@@ -207,11 +208,11 @@ export function CircleScreen() {
               <>
                 <Text className="font-display-medium text-base text-ink">You bumped into {firstName(bumped.name)}</Text>
                 <Muted>
-                  {bumped.count} {bumped.count === 1 ? 'bump' : 'bumps'} · drag anyone, fling them, tap to open
+                  {bumped.count} {bumped.count === 1 ? 'bump' : 'bumps'} · drag yourself around, tap anyone to open
                 </Muted>
               </>
             ) : (
-              <Muted>Drag anyone. People who know each other stick together.</Muted>
+              <Muted>Drag your 0° into people. Green lines are friends who know each other.</Muted>
             )}
           </View>
           <View className="mt-1 w-full flex-row flex-wrap justify-center gap-x-5 gap-y-1">

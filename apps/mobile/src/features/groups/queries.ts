@@ -21,6 +21,7 @@ export const queryKeys = {
   hangouts: ['hangouts'] as const,
   photos: (id: string) => ['photos', id] as const,
   graph: ['graph', 'me'] as const,
+  reach: ['graph', 'reach'] as const,
   notifications: ['notifications'] as const,
 };
 

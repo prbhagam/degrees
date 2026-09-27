@@ -1,5 +1,6 @@
 // Owner: Pranav (Groups, Activities & Chat) — Added Sep 26 (wave 2, Sahith).
 // CHANGED Sep 26 (wave 5, Sahith): each summary carries `lastMessage` and `chatOpen` for the Chats tab.
+// CHANGED Sep 27 (wave 6): and `memberNames` / `unrevealedCount`, so an unnamed group is titled by who's in it.
 // GET /api/hangouts: every group the viewer belongs to, matched and meetup alike, as one list for Home. Replaces
 // the app's direct `group_members → groups` read, which couldn't see meetup names or room codes (RLS never
 // exposed `events`) and had no way to show history.
@@ -54,6 +55,9 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
       acceptedCount: event.attendeeIds.length,
       lastMessage: null,
       chatOpen: true,
+      memberNames: [],
+      unrevealedCount: 0,
+      feedbackGiven: false,
     }));
     const response = { hangouts: [...hosted, ...hangoutsFixture.hangouts] } satisfies HangoutsResponse;
     return context.json(response);
@@ -75,7 +79,7 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
     return context.json(response);
   }
 
-  const [groups, counts, meetups, recent] = await Promise.all([
+  const [groups, counts, meetups, recent, feedback] = await Promise.all([
     db
       .from('groups')
       .select('id, kind, name, status, reasoning, formed_at, scheduled_at, completed_at, created_by')
@@ -89,11 +93,15 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
       .in('group_id', groupIds)
       .order('created_at', { ascending: false })
       .limit(300),
+    // wave 6: which of these the viewer has already left feedback on.
+    db.from('event_feedback').select('group_id').eq('author_id', userId).in('group_id', groupIds),
   ]);
   if (groups.error) throw new Error(`groups read failed: ${groups.error.message}`);
   if (counts.error) throw new Error(`group_members read failed: ${counts.error.message}`);
   if (meetups.error) throw new Error(`events read failed: ${meetups.error.message}`);
   if (recent.error) throw new Error(`messages read failed: ${recent.error.message}`);
+  if (feedback.error) throw new Error(`event_feedback read failed: ${feedback.error.message}`);
+  const feedbackGiven = new Set(feedback.data.map((row) => row.group_id as string));
   const latestByGroup = new Map<string, { sender_id: string; body: string; created_at: string }>();
   for (const row of recent.data) {
     const id = row.group_id as string;
@@ -114,25 +122,27 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
   }
   // Wave 4: a proposed matched group's reasoning must not name anyone the viewer hasn't met (same rule as
   // GET /groups/:id). Everyone at 1st degree is revealed; anyone else's name is scrubbed.
+  // Wave 6: the same rule decides which names title the group (memberNames), so basics are read for everyone.
   const proposedIds = (groups.data as GroupRow[])
     .filter((row) => (row.status ?? 'proposed') === 'proposed' && (row.kind ?? 'matched') === 'matched')
     .map((row) => row.id);
+  const otherIds = [...new Set([...memberIds.values()].flat())].filter((id) => id !== userId);
+  const [basics, { reach }] = await Promise.all([
+    profileBasics(otherIds),
+    proposedIds.length > 0 ? exploreFrom(userId, 1) : Promise.resolve({ reach: new Map() }),
+  ]);
+  const hiddenIdsByGroup = new Map<string, Set<string>>();
   const hiddenNamesByGroup = new Map<string, string[]>();
-  if (proposedIds.length > 0) {
-    const { reach } = await exploreFrom(userId, 1);
-    const candidates = [...new Set(proposedIds.flatMap((id) => memberIds.get(id) ?? []))].filter(
-      (id) => id !== userId && !reach.has(id),
+  for (const id of proposedIds) {
+    const hidden = (memberIds.get(id) ?? []).filter((memberId) => memberId !== userId && !reach.has(memberId));
+    hiddenIdsByGroup.set(id, new Set(hidden));
+    hiddenNamesByGroup.set(
+      id,
+      hidden.flatMap((memberId) => {
+        const name = basics.get(memberId)?.displayName;
+        return name ? [name] : [];
+      }),
     );
-    const basics = await profileBasics(candidates);
-    for (const id of proposedIds) {
-      hiddenNamesByGroup.set(
-        id,
-        (memberIds.get(id) ?? []).flatMap((memberId) => {
-          const name = basics.get(memberId)?.displayName;
-          return candidates.includes(memberId) && name ? [name] : [];
-        }),
-      );
-    }
   }
   const meetupByGroup = new Map(
     (meetups.data as MeetupRow[]).map((row) => [row.group_id as string, row]),
@@ -146,6 +156,8 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
     const kind = row.kind ?? (meetup ? 'meetup' : 'matched');
     const chatOpen = kind === 'meetup' || status !== 'proposed';
     const latest = latestByGroup.get(row.id);
+    const others = (memberIds.get(row.id) ?? []).filter((id) => id !== userId);
+    const hidden = hiddenIdsByGroup.get(row.id);
     return {
       id: row.id,
       kind,
@@ -170,6 +182,9 @@ export const hangoutRoutes = new Hono<AppEnv>().get('/hangouts', async (context)
           }
         : null,
       chatOpen,
+      memberNames: others.filter((id) => !hidden?.has(id)).map((id) => basics.get(id)?.displayName ?? 'Someone'),
+      unrevealedCount: others.filter((id) => hidden?.has(id)).length,
+      feedbackGiven: feedbackGiven.has(row.id),
     };
   });
 

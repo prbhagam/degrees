@@ -1,12 +1,13 @@
 // Owner: Sahith (Data & Matching) — see docs/ROLES.md.
 import { ThinkingLevel, Type } from '@google/genai';
 import { z } from 'zod';
-import type { FormGroupsInput, FormGroupsOutput } from '@degrees/shared';
+import { MATCHED_GROUP_MAX, type FormGroupsInput, type FormGroupsOutput } from '@degrees/shared';
 import { FLASH_LITE_MODEL, FLASH_MODEL, getAiClient } from '../ai/client.js';
 import { env } from '../config/env.js';
 
 // Group size is soft, but never let a model response balloon a group past this.
-export const ABSOLUTE_MAX_GROUP = 8;
+// Wave 6: the value lives in @degrees/shared so the preferences screen's size presets stop where this does.
+export const ABSOLUTE_MAX_GROUP = MATCHED_GROUP_MAX;
 // Lite first (~1s response) to avoid Netlify function timeouts, then Flash with fallback to deterministic score.
 const ATTEMPTS = [
   { model: FLASH_LITE_MODEL, timeoutMs: 2500 },

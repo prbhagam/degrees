@@ -7,14 +7,9 @@ import { Stack, useRouter } from 'expo-router';
 import { ChevronRight } from 'lucide-react-native';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { ErrorState, LoadingState, Muted, Screen, initials } from '@/components/ui';
-import { firstName } from '@/features/groups/degrees';
+import { firstName, summaryTitle } from '@/features/groups/degrees';
 import { useHangouts } from '@/features/groups/queries';
 import { usePullToRefresh } from '@/lib/query';
-
-function summaryTitle(hangout: HangoutSummary): string {
-  if (hangout.name) return hangout.name;
-  return hangout.memberCount > 0 ? `Group of ${hangout.memberCount}` : 'Your group';
-}
 
 function KindTag({ kind }: { kind: HangoutSummary['kind'] }) {
   const meetup = kind === 'meetup';

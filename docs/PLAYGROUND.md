@@ -4,6 +4,14 @@
 
 The idea from Sahith: something playful and simple from your own graph — drag your node around and bump into your connections. Not a feature that does anything; a toy that makes the graph feel like *yours*.
 
+## Wave 6: people hold their seats, you move
+
+Testing said: "Circle map is broken, all nodes clustered near center because your first degrees who are connected try to web together — want them to stay in place while we move our node around to interact." Root cause: every mutual pair shared a stiff 78px spring (`K_MUTUAL` 22) while each spoke to you was slack (`K_SPOKE` 6), plus everyone repelled everyone. With the seeded random demo edges most of a circle knows each other, so the mutual springs won and the circle knotted up in the middle. Now:
+
+- **Seats.** `features/circle/layout.ts` gives everyone a fixed home: one ring at 112pt when they fit (13 people), otherwise concentric rings out to the canvas edge, filled in proportion to what each seats (no overlaps up to 22 on a 350×340 canvas; past that the rings pack tighter). `clusterOrder` walks each mutual-friend cluster breadth-first so friends sit side by side.
+- **Forces.** A strong spring home (`K_HOME` 70) for people, a gentle one for you (`K_ME_HOME` 9) that only acts once you let go. Mutual edges are drawn (sage), not forces. The only other force is contact: overlapping bodies push apart, capped at two people's seat distance so a packed ring is at rest.
+- **Only you move.** Drag the ember 0° into people: they're shoved aside, knock their neighbours, flash, tap the phone, and settle home. Drags that start anywhere else do nothing; a tap still opens someone's card.
+
 ## Wave 5: Play is the map
 
 Wave 4 shipped a static SVG map and a separate **Play** toggle where only you moved. Testing said: "Play should be in map — not a separate thing — and make it more interactive with push and pull and see how connections interact." So there is one Map now, and it is physical:

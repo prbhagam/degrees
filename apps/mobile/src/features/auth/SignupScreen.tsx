@@ -3,13 +3,19 @@
 // auth email is that address, no longer `<username>@degrees.demo`.
 // CHANGED Sep 26 (wave 2): phone formats as (404) 555-0148 while typing (US only for now), password has a
 // show/hide toggle (Field), and onboarding is entered with replace so it isn't left under the app.
+// CHANGED Sep 27 (wave 6): an optional profile photo up top. It's picked before the account exists and uploaded right
+// after sign-in (the avatars bucket only takes writes into your own folder), then saved with PUT /api/profile/photo.
+// A failed upload doesn't block signup; Edit profile can set it later. The form scrolls clear of the keyboard now
+// (Screen: automaticallyAdjustKeyboardInsets).
 import { useState } from 'react';
 import { formatUsPhone, signupRequestSchema } from '@degrees/shared';
 import { useMutation } from '@tanstack/react-query';
 import { Link, Stack, useRouter } from 'expo-router';
-import { Text, View } from 'react-native';
-import { Body, Button, Chip, ErrorState, Field, Screen } from '@/components/ui';
+import { Camera } from 'lucide-react-native';
+import { Image, Pressable, Text, View } from 'react-native';
+import { Body, Button, Chip, ErrorState, Field, Muted, Screen } from '@/components/ui';
 import { api } from '@/lib/api';
+import { pickImage, uploadAvatar, type PickedImage } from '@/lib/upload';
 import { getSupabaseClient, isSupabaseEnvironmentUnset } from '@/lib/supabase';
 import { useSessionStore } from '@/stores/session';
 
@@ -25,6 +31,18 @@ export function SignupScreen() {
   const [username, setUsername] = useState('');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [photo, setPhoto] = useState<PickedImage | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+
+  const choosePhoto = async () => {
+    setPhotoError(null);
+    try {
+      const picked = await pickImage({ square: true });
+      if (picked) setPhoto(picked);
+    } catch (error) {
+      setPhotoError(error instanceof Error ? error.message : 'Could not open your photos.');
+    }
+  };
 
   const signup = useMutation({
     mutationFn: async () => {
@@ -49,7 +67,17 @@ export function SignupScreen() {
         });
         if (error) throw new Error(error.message);
       }
-      return api.getMe();
+      const me = await api.getMe();
+      if (photo) {
+        try {
+          const photoUrl = await uploadAvatar(me.id, photo);
+          await api.updatePhoto({ photoUrl });
+          return { ...me, photoUrl };
+        } catch (error) {
+          console.warn('[signup] profile photo upload failed; continuing without it:', error);
+        }
+      }
+      return me;
     },
     onSuccess: (me) => {
       setCurrentUser(me);
@@ -64,7 +92,24 @@ export function SignupScreen() {
       <Text className="font-display text-2xl text-ink">Create your account</Text>
       <Body className="mt-1 text-muted">Takes about two minutes.</Body>
 
-      <View className="mt-6 gap-4">
+      <View className="mt-6 items-center gap-2">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={photo ? 'Change profile photo' : 'Add a profile photo'}
+          onPress={() => void choosePhoto()}
+          className="h-24 w-24 items-center justify-center overflow-hidden rounded-full border-2 border-dashed border-line bg-paper-raised"
+        >
+          {photo ? (
+            <Image source={{ uri: photo.uri }} className="h-24 w-24" accessibilityIgnoresInvertColors />
+          ) : (
+            <Camera size={26} color="#8A8378" />
+          )}
+        </Pressable>
+        <Muted>{photo ? 'Tap to change' : 'Add a photo (optional)'}</Muted>
+        {photoError ? <Muted className="text-ember-ink">{photoError}</Muted> : null}
+      </View>
+
+      <View className="mt-4 gap-4">
         <Field label="Full name" value={name} onChangeText={setName} placeholder="Alexandra Okonkwo-Bennett" />
 
         <View>

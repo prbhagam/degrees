@@ -3,22 +3,57 @@
 // CHANGED Sep 26 (wave 2): prefills saved values, "Skip for now" during onboarding, the group-size row no
 // longer collapses (each stepper has its own labelled column), and finishing collapses the auth/onboarding
 // stack so nothing can be swiped back to.
+// CHANGED Sep 27 (wave 6, Sahith): the degree dial shows real headcounts (GET /api/graph/reach) instead of a made-up
+// 12 / 140 / 900. A new account with no connections sees an honest 0 plus what's typical here once you've met people.
+// Group size is four presets, not two steppers capped at an arbitrary 20: matched groups never pass
+// MATCHED_GROUP_MAX (the matcher's hard cap), so "No preference" is the whole range; meetups have no cap at all.
 import { useEffect, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import type { Frequency } from '@degrees/shared';
+import { MATCHED_GROUP_MAX, type Frequency, type ReachCount } from '@degrees/shared';
 import { Pressable, Text, View } from 'react-native';
-import { Body, Button, Card, Chip, ErrorState, Muted, Screen, Stepper } from '@/components/ui';
+import { Body, Button, Card, Chip, ErrorState, Muted, Screen } from '@/components/ui';
 import { queryKeys, useMe } from '@/features/groups/queries';
 import { api } from '@/lib/api';
 import { useOnboardingFlow } from './flow';
 
 // You are degree 0. Each step out is one "we met in person" edge further from you.
 const DEGREES = [
-  { value: 1, label: '1st degree only', desc: 'Only people you have met in person.', reach: '12' },
-  { value: 2, label: 'Up to 2nd degree', desc: 'Your 1st degree, plus the people they have met.', reach: '140', recommended: true },
-  { value: 3, label: 'Up to 3rd degree', desc: 'Three introductions out — the whole reachable graph.', reach: '900' },
+  { value: 1, label: '1st degree only', desc: 'Only people you have met in person.' },
+  { value: 2, label: 'Up to 2nd degree', desc: 'Your 1st degree, plus the people they have met.', recommended: true },
+  { value: 3, label: 'Up to 3rd degree', desc: 'Three introductions out — the whole reachable graph.' },
 ];
+
+function countAt(counts: ReachCount[] | null | undefined, degree: number): number | null {
+  return counts?.find((count) => count.degree === degree)?.people ?? null;
+}
+
+// Wave 6: sizes as presets (counting you). The largest stops at the matcher's cap; "No preference" is 2 to the cap.
+const SIZES = [
+  { key: 'small', label: 'Small', range: [2, 4] },
+  { key: 'medium', label: 'Medium', range: [4, 6] },
+  { key: 'big', label: 'Big', range: [6, MATCHED_GROUP_MAX] },
+  { key: 'any', label: 'No preference', range: [2, MATCHED_GROUP_MAX] },
+] as const;
+type SizeKey = (typeof SIZES)[number]['key'];
+
+// Older saves came from the steppers (any min/max up to 20): pick the preset whose range overlaps it most.
+function sizeFor(min: number, max: number): SizeKey {
+  const hi = Math.min(max, MATCHED_GROUP_MAX);
+  const lo = Math.min(min, hi);
+  if (lo <= 2 && hi >= MATCHED_GROUP_MAX) return 'any';
+  let best: SizeKey = 'medium';
+  let bestOverlap = -Infinity;
+  for (const size of SIZES) {
+    if (size.key === 'any') continue;
+    const overlap = Math.min(hi, size.range[1]) - Math.max(lo, size.range[0]);
+    if (overlap > bestOverlap) {
+      best = size.key;
+      bestOverlap = overlap;
+    }
+  }
+  return best;
+}
 
 const DISTANCES = ['Walking distance', 'Same city', 'Anywhere'] as const;
 type Distance = (typeof DISTANCES)[number];
@@ -62,8 +97,7 @@ export function PreferencesScreen() {
   const inOnboarding = mode !== 'settings';
 
   const [degree, setDegree] = useState(2);
-  const [groupMin, setGroupMin] = useState(3);
-  const [groupMax, setGroupMax] = useState(6);
+  const [size, setSize] = useState<SizeKey>('medium');
   const [distance, setDistance] = useState<Distance>('Same city');
   const [cost, setCost] = useState<Cost>('$');
   const [frequency, setFrequency] = useState<Frequency>('biweekly');
@@ -74,14 +108,17 @@ export function PreferencesScreen() {
     const saved = me.data.preferences;
     if (saved) {
       setDegree(saved.maxDegrees);
-      setGroupMin(saved.groupSizeMin);
-      setGroupMax(saved.groupSizeMax);
+      setSize(sizeFor(saved.groupSizeMin, saved.groupSizeMax));
       setDistance(distanceFor(saved.maxTravelMi));
       setCost(costFor(saved.costMaxCents));
       setFrequency(saved.frequency);
     }
     setSeeded(true);
   }, [me.data, seeded]);
+
+  const reach = useQuery({ queryKey: queryKeys.reach, queryFn: api.getReach });
+  const hasConnections = (countAt(reach.data?.mine, 1) ?? 0) > 0;
+  const [groupMin, groupMax] = SIZES.find((option) => option.key === size)!.range;
 
   const save = useMutation({
     mutationFn: () =>
@@ -139,29 +176,40 @@ export function PreferencesScreen() {
                 <Muted>{option.desc}</Muted>
               </View>
               <View className="items-end">
-                <Text className="font-display text-[15px] text-ink">{option.reach}</Text>
-                <Muted>people</Muted>
+                <Text className="font-display text-[15px] text-ink">
+                  {countAt(reach.data?.mine, option.value) ?? '–'}
+                </Text>
+                {reach.data && !hasConnections && countAt(reach.data.typical, option.value) !== null ? (
+                  <Muted>~{countAt(reach.data.typical, option.value)} typical</Muted>
+                ) : (
+                  <Muted>people</Muted>
+                )}
               </View>
             </Pressable>
           );
         })}
       </View>
 
+      {reach.data && !hasConnections ? (
+        <Muted className="mt-2">
+          You haven't met anyone on Degrees yet, so every ring is empty. Scan one person's code and they fill in
+          {reach.data.typical ? ' — "typical" is what people here reach once they have.' : '.'}
+        </Muted>
+      ) : null}
+
       <Card className="mt-5">
         <View className="gap-3 border-b border-line pb-4">
           <Text className="font-body-semibold text-sm text-ink">Group size</Text>
-          <View className="flex-row items-center justify-between">
-            <View className="items-center gap-1">
-              <Muted>Min</Muted>
-              <Stepper value={groupMin} min={2} max={groupMax} onDecrement={() => setGroupMin((v) => Math.max(2, v - 1))} onIncrement={() => setGroupMin((v) => Math.min(groupMax, v + 1))} />
-            </View>
-            <Muted>to</Muted>
-            <View className="items-center gap-1">
-              <Muted>Max</Muted>
-              <Stepper value={groupMax} min={groupMin} max={20} onDecrement={() => setGroupMax((v) => Math.max(groupMin, v - 1))} onIncrement={() => setGroupMax((v) => Math.min(20, v + 1))} />
-            </View>
+          <View className="flex-row flex-wrap gap-2">
+            {SIZES.map((option) => (
+              <Chip key={option.key} label={option.label} selected={size === option.key} onPress={() => setSize(option.key)} />
+            ))}
           </View>
-          <Muted>{groupMin}–{groupMax} people per hangout</Muted>
+          <Muted>
+            {size === 'any'
+              ? `Whatever fits — matched groups go up to ${MATCHED_GROUP_MAX}. Meetups have no limit.`
+              : `${groupMin}–${groupMax} people per hangout, counting you. A good group can land just outside it.`}
+          </Muted>
         </View>
 
         <View className="gap-2 border-b border-line py-4">

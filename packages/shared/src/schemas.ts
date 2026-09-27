@@ -104,6 +104,25 @@ export const signupRequestSchema = z.object({
   pronouns: z.string().trim().optional(),
 });
 
+// Added Sep 27 (wave 6): PUT /api/profile/photo — just the avatar, for signup, where the rest of the profile doesn't
+// exist yet (PUT /api/profile replaces every field, tags included).
+export const updatePhotoRequestSchema = z.object({
+  photoUrl: z.url().max(1024),
+});
+
+// Added Sep 27 (wave 6): POST /api/profile/tags — the About screen's paragraph → suggested tags (real Gemini call; it
+// used to be canned in the app). The client sends its pickable lists so labels match what everyone else chose.
+export const extractTagsRequestSchema = z.object({
+  text: z.string().trim().min(1, 'Write a little about yourself first.').max(2000),
+  knownInterests: z.array(z.string().max(40)).max(60).default([]),
+  avoidOptions: z.array(z.string().max(40)).max(20).default([]),
+});
+
+export const extractTagsOutputSchema = z.object({
+  interests: z.array(z.string()),
+  avoids: z.array(z.string()),
+});
+
 export const updateProfileRequestSchema = z.object({
   displayName: z.string(),
   bio: z.string(),
@@ -193,13 +212,16 @@ export const analyzeFeedbackOutputSchema = z.object({
 
 // ---- Added Sep 26: host-created events, contact exchange, photos, notifications ------------
 
+// CHANGED Sep 27 (wave 6): hosting takes nothing. A meetup is people already together swapping degrees, so the name
+// is optional (the group is titled by who's in it until someone renames it) and the size targets are gone from the
+// app; they stay accepted for older clients.
 export const createEventRequestSchema = z.object({
-  name: z.string(),
+  name: z.string().trim().max(80).optional(),
   description: z.string().optional(),
   scheduledAt: z.iso.datetime().optional(),
   city: z.string().optional(),
-  groupSizeMin: z.number().int(),
-  groupSizeMax: z.number().int(),
+  groupSizeMin: z.number().int().optional(),
+  groupSizeMax: z.number().int().optional(),
 });
 
 export const exchangeRequestSchema = z.object({

@@ -377,6 +377,10 @@ export const hangoutsFixture = {
         createdAt: '2026-09-26T14:14:00.000Z',
       },
       chatOpen: true,
+      // wave 6: who titles the unnamed group on Home and Chats.
+      memberNames: people.slice(1, 4).map((person) => person.displayName),
+      unrevealedCount: 0,
+      feedbackGiven: false,
     },
     {
       id: DEMO_MEETUP_GROUP_ID,
@@ -395,6 +399,9 @@ export const hangoutsFixture = {
       acceptedCount: 4,
       lastMessage: null,
       chatOpen: true,
+      memberNames: people.slice(1, 6).map((person) => person.displayName),
+      unrevealedCount: 0,
+      feedbackGiven: false,
     },
   ],
 } satisfies HangoutsResponse;

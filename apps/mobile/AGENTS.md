@@ -14,7 +14,7 @@ src/app/                 Expo Router routes. Every file is a screen; _layout.tsx
   (tabs)/_layout.tsx     the bottom nav (Home · Chats · Circle · You) from the validated design; items centred over the home indicator (wave 5)  (Charles)
   (tabs)/index.tsx                         → features/home          (Pranav) your groups, find a group, meet someone, host/join
   (tabs)/chats.tsx                         → features/chat          (Pranav) wave 5: every open group chat, newest message first
-  (tabs)/circle.tsx                        → features/circle        (Pranav) Your circle: list + the physics map (CircleGraph, wave 5: drag/fling anyone, mutual friends cluster), contact exchange (wave 3)
+  (tabs)/circle.tsx                        → features/circle        (Pranav) Your circle: list + the physics map (CircleGraph; wave 6: everyone holds a seat from layout.ts, only you move), contact exchange (wave 3)
   (tabs)/profile.tsx                       → features/profile       (Charles) "Degree 0 (You)"
   login.tsx signup.tsx                     → features/auth          (Charles)
   onboarding/{interests,about,preferences}.tsx → features/onboarding (Charles)
@@ -136,12 +136,22 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 - **Notifications** are real: the server writes `hangout_invited`, `hangout_forming`, `exchange_requested`/`accepted`, `connection_added`, and the new `event_changed` (`payload.change`: renamed | time | plan | ended). `useNotifications` subscribes to Realtime on `notifications` (JWT on the socket) with the 60s poll as fallback; `useUnreadCount()` puts an ember dot on Home's bell; the feed calls `POST /api/notifications/read` on open. `notifications/settings.tsx` has four switches (`MeResponse.notificationSettings`, `PUT /api/notifications/settings`, optimistic with rollback).
 - Query cache buster is `wave5` (`HangoutSummary` and `GroupResponse` grew).
 
+## Wave 6 (Sep 27, fourth testing round — Sahith)
+
+- **Home** sections, top to bottom: Needs your reply (`needsResponse`), the profile nag, Your hangouts, Awaiting feedback (ended ≤7 days ago and `!feedbackGiven`; tapping opens the feedback screen, which invalidates `hangouts` on submit), Grow your circle, then Past collapsed behind a toggle.
+- **Titles**: `titleFromNames()` in `features/groups/degrees.ts` backs both `hangoutTitle(GroupResponse)` and `summaryTitle(HangoutSummary)` — first names, three at most, then "+ N more". Never "Group of N".
+- **Host a meetup** is one button (`api.createEvent({})`); rename lives on the group screen.
+- **Keyboard**: `Screen` sets `automaticallyAdjustKeyboardInsets` (RN insets the scroll view and scrolls the focused field into view) and `keyboardDismissMode="interactive"`. Don't wrap `Screen` in a `KeyboardAvoidingView` on top of that.
+- **401s**: `api.ts` refreshes the session once on a server 401 and retries; a rejected refresh signs out locally (the auth listener clears caches, the gate goes to /login). Network errors never sign anyone out.
+- **Circle map**: seats come from `features/circle/layout.ts` (`clusterOrder` + `homeSpots`, plain TS — checkable with tsx). Mutual edges are drawn only; contacts are the only forces besides the home springs, so an untouched map has zero net force.
+- Query cache buster is `wave6`.
+
 ## Known gaps (Sep 26, after wave 3)
 
 Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
 - ~~**Notifications** poll once a minute (no Realtime, no mark-read), and nothing writes rows yet.~~ Done in wave 5 (Realtime, mark-read, settings, server writers). `message_received` and `feedback_prompt` still have no writer.
 - **Feedback**: the group-tag chips are never sent. (Contact exchange moved to 1st-degree friends in wave 3, with a real "wants your number" state for the peer; the fake "(demo: they said yes)" link is gone.)
 - **Photo save** uses `expo-media-library`, which Expo Go bundles; a dev build needs the plugin entry in `app.json` (added).
-- **About**: "Generate tags" is still canned (a real endpoint is Christian's); accepted tags now go out as `hobby`.
-- **Preferences** reach counts are hard-coded (values now prefill).
+- ~~**About**: "Generate tags" is still canned.~~ Real in wave 6 (`POST /api/profile/tags`); accepted tags go out as `hobby`, mentioned avoids are pre-selected.
+- ~~**Preferences** reach counts are hard-coded.~~ Real in wave 6 (`GET /api/graph/reach`).
 - **Chat push while backgrounded** was deliberately not built (needs APNs + a dev build); in-app delivery is Realtime with a 30s safety poll.
