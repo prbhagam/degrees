@@ -56,12 +56,17 @@ export async function timed<T>(
   event: string,
   fields: Fields,
   work: () => Promise<T>,
+  isFailure?: (result: T) => boolean,
 ): Promise<T> {
   const started = Date.now();
   log.debug(`${event}.start`, fields);
   try {
     const result = await work();
-    log.info(`${event}.ok`, { ...fields, ms: Date.now() - started });
+    if (isFailure?.(result)) {
+      log.warn(`${event}.failed`, { ...fields, ms: Date.now() - started });
+    } else {
+      log.info(`${event}.ok`, { ...fields, ms: Date.now() - started });
+    }
     return result;
   } catch (error) {
     log.error(`${event}.fail`, error, { ...fields, ms: Date.now() - started });

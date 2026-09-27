@@ -407,6 +407,15 @@ Reply with only a JSON object, no prose:
       abortSignal,
     },
   });
+  const groundingMetadata = response.candidates?.[0]?.groundingMetadata;
+  log.info('ai.activity.grounding', {
+    model,
+    webSearchQueries: groundingMetadata?.webSearchQueries ?? [],
+    webSources:
+      groundingMetadata?.groundingChunks?.filter((chunk) => Boolean(chunk.web)).length ?? 0,
+    mapsSources:
+      groundingMetadata?.groundingChunks?.filter((chunk) => Boolean(chunk.maps)).length ?? 0,
+  });
   const plan = groundedPlanSchema.parse(extractJson(response.text ?? ''));
   const violation = violatesAvoids(`${plan.venue} ${plan.title}`, input);
   if (violation) {

@@ -345,6 +345,7 @@ export const groupRoutes = new Hono<AppEnv>()
     const input = await activityInput(groupId, userId);
     const result = await timed('ai.activity.stage', { groupId, stage: job.stage }, () =>
       runActivityStage(job, input, STAGE_BUDGET_MS),
+      (stageResult) => stageResult.failed === true,
     );
     if (result.failed) {
       const { lockedUntil: _unlocked, ...failedJob } = result.job;
