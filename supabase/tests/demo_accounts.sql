@@ -181,6 +181,36 @@ insert into public.activities (group_id, title) values
   ('f0000000-0000-4000-8000-000000000002', 'plan that goes');
 insert into public.notifications (user_id, type) values (pg_temp.pid(1), 'demo'), (pg_temp.rid(1), 'real');
 
+-- Mentions of demo people outside ID-linked rows (Sep 27).
+insert into public.groups (id, kind, status, name) values
+  ('f0000000-0000-4000-8000-000000000006', 'matched', 'confirmed', 'real only');
+insert into public.group_members (group_id, user_id, degree, accepted_at) values
+  ('f0000000-0000-4000-8000-000000000006', pg_temp.rid(1), 0, now()),
+  ('f0000000-0000-4000-8000-000000000006', pg_temp.rid(2), 1, now());
+update public.groups
+set reasoning = 'Riley and Sam met Alex Rivera and Sam Okafor; Alex picked coffee.', name = 'Alex fan club'
+where id = 'f0000000-0000-4000-8000-000000000001';
+update public.activities set reasoning = 'Alex suggested it.' where title = 'kept plan';
+insert into public.group_icebreakers (group_id, position, prompt) values
+  ('f0000000-0000-4000-8000-000000000001', 0, 'Alex and Riley both love coffee.'),
+  ('f0000000-0000-4000-8000-000000000006', 0, 'Ask Maya about pottery.');
+insert into public.messages (group_id, sender_id, body) values
+  ('f0000000-0000-4000-8000-000000000001', pg_temp.rid(1), 'has anyone heard from Alex?');
+insert into public.group_times (id, group_id, proposed_by, starts_at, note) values
+  ('f2000000-0000-4000-8000-000000000001', 'f0000000-0000-4000-8000-000000000001', pg_temp.pid(2), now() + interval '1 day', null),
+  ('f2000000-0000-4000-8000-000000000002', 'f0000000-0000-4000-8000-000000000001', pg_temp.rid(1), now() + interval '2 days', 'works for Alex?'),
+  ('f2000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000002', pg_temp.rid(1), now() + interval '3 days', null);
+insert into public.group_time_votes (time_id, group_id, user_id) values
+  ('f2000000-0000-4000-8000-000000000001', 'f0000000-0000-4000-8000-000000000001', pg_temp.rid(1)),
+  ('f2000000-0000-4000-8000-000000000002', 'f0000000-0000-4000-8000-000000000001', pg_temp.rid(2)),
+  ('f2000000-0000-4000-8000-000000000002', 'f0000000-0000-4000-8000-000000000001', pg_temp.pid(2)),
+  ('f2000000-0000-4000-8000-000000000003', 'f0000000-0000-4000-8000-000000000002', pg_temp.rid(1));
+insert into public.notifications (user_id, type, payload) values
+  (pg_temp.rid(1), 'exchange_requested', jsonb_build_object('peerId', pg_temp.pid(1), 'peerName', 'Maya Chen')),
+  (pg_temp.rid(1), 'plan_changed', jsonb_build_object('groupId', 'f0000000-0000-4000-8000-000000000002')),
+  (pg_temp.rid(1), 'nested', jsonb_build_object('meta', jsonb_build_object('people', jsonb_build_array(pg_temp.pid(3))))),
+  (pg_temp.rid(1), 'kept_group_ping', jsonb_build_object('groupId', 'f0000000-0000-4000-8000-000000000001'));
+
 -- ---- purge --------------------------------------------------------------------------------------------------
 \o /dev/null
 \ir ../scripts/purge_demo_users.sql
@@ -236,6 +266,40 @@ begin
   -- Wave 4: the unanswered demo member was the only thing holding this group at 'proposed'.
   perform pg_temp.assert_eq('group confirms once the pending demo member is gone', (
     select count(*) from public.groups where id = 'f0000000-0000-4000-8000-000000000004' and status = 'confirmed'
+  ), 1);
+  perform pg_temp.assert_eq('notifications pointing at demo people or deleted groups gone; others kept', (
+    select count(*) from public.notifications where user_id = pg_temp.rid(1)
+  ), 2);
+  if not exists (select 1 from public.notifications where type = 'kept_group_ping') then
+    raise exception 'a notification about a surviving group should stay';
+  end if;
+  if (select reasoning from public.groups where id = 'f0000000-0000-4000-8000-000000000001')
+     <> 'Riley and Sam met someone and someone; someone picked coffee.' then
+    raise exception 'reasoning not redacted as expected (the real Sam must stay): %',
+      (select reasoning from public.groups where id = 'f0000000-0000-4000-8000-000000000001');
+  end if;
+  perform pg_temp.assert_eq('group name, plan reasoning, and time note redacted', (
+    (select count(*) from public.groups where id = 'f0000000-0000-4000-8000-000000000001' and name = 'someone fan club')
+    + (select count(*) from public.activities where title = 'kept plan' and reasoning = 'someone suggested it.')
+    + (select count(*) from public.group_times where id = 'f2000000-0000-4000-8000-000000000002' and note = 'works for someone?')
+  ), 3);
+  perform pg_temp.assert_eq('icebreakers cleared in a group that lost a member', (
+    select count(*) from public.group_icebreakers where group_id = 'f0000000-0000-4000-8000-000000000001'
+  ), 0);
+  perform pg_temp.assert_eq('icebreaker elsewhere redacted', (
+    select count(*) from public.group_icebreakers
+    where group_id = 'f0000000-0000-4000-8000-000000000006' and prompt = 'Ask someone about pottery.'
+  ), 1);
+  perform pg_temp.assert_eq('a real person''s own message is left as written', (
+    select count(*) from public.messages where body = 'has anyone heard from Alex?'
+  ), 1);
+  perform pg_temp.assert_eq('demo-proposed time and deleted group''s time gone, with their votes', (
+    (select count(*) from public.group_times)
+    + (select count(*) from public.group_time_votes)
+  ), 1 + 1);
+  perform pg_temp.assert_eq('the surviving time keeps only its real vote', (
+    select count(*) from public.group_time_votes
+    where time_id = 'f2000000-0000-4000-8000-000000000002' and user_id = pg_temp.rid(2)
   ), 1);
   perform pg_temp.assert_eq('group still waiting on a real member stays proposed', (
     select count(*) from public.groups where id = 'f0000000-0000-4000-8000-000000000005' and status = 'proposed'
