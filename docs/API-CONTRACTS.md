@@ -6,7 +6,7 @@ This file is what makes four people concurrent. It is implemented as TypeScript 
 
 **CHANGED Sep 26 (wave 2, Sahith's branch `sahith/wave2-fixes`)** — additive unless marked: `GET /api/hangouts`, `POST /api/groups/:id/leave`, `POST /api/groups/:id/icebreakers`; `GroupResponse` gains `kind`/`name`/`hostId`/`scheduledAt`/`roomCode`/`codeExpiresAt`/`icebreakers`; `GroupMember.met`; `JoinEventResponse` gains `groupId`/`hostId`/`scheduledAt`/`codeExpiresAt`/`endedAt` and `attendees[].alreadyMet`; `MeResponse` gains `profileStatus` + `preferences`; `Photo.url`; phone numbers are validated as US and stored E.164; `POST /api/match/run` returns 409 `profile_incomplete` until onboarding is done; `POST /api/events/:roomCode/join` returns 410 `event_code_expired`. Every response carries an `x-request-id` header that matches the server's log line.
 
-**CHANGED Sep 26 (wave 3, Sahith's branch `sahith/wave3-testing-fixes`)** — additive: `GroupResponse.activityHistory` (earlier plans, newest first) and `Activity.id`/`createdAt` on saved plans; `POST /api/groups/:id/activity/restore`; `POST /api/groups/:id/leave` now works on completed hangouts too (no more 409 `group_completed`); `GET /api/graph/me` nodes carry `contact` and `POST /api/graph/exchange` is the pair-keyed contact exchange (the per-group `exchange-*` routes stay for compatibility, the app no longer calls them); `GenerateActivityInput` members carry `avoids` and the input carries `previousVenues`. Needs migration `0010`.
+**CHANGED Sep 26 (wave 3, Sahith's branch `sahith/wave3-testing-fixes`)** — additive: `GroupResponse.activityHistory` (earlier plans, newest first) and `Activity.id`/`createdAt` on saved plans; `POST /api/groups/:id/activity/restore`; `POST /api/groups/:id/leave` on a live meetup now undoes only the connections that meetup created for the leaver (edges with its `event_id`), never pre-existing ones — and a lobby "We met" sends `eventId` so it counts; `GET /api/graph/me` nodes carry `contact` and `POST /api/graph/exchange` is the pair-keyed contact exchange (the per-group `exchange-*` routes stay for compatibility, the app no longer calls them); `GenerateActivityInput` members carry `avoids` and the input carries `previousVenues`. Needs migration `0010`.
 
 **Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
 **Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
@@ -151,8 +151,11 @@ POST /api/groups/:id/respond
 POST /api/groups/:id/complete
   → { ok: true }
 
-// Added wave 2: drop out of a group or meetup. CHANGED wave 3: works on a completed hangout too — it leaves
-// your list; the connections it formed, your feedback, and your photos all stay. Only the membership row goes.
+// Added wave 2: drop out of a proposed/confirmed group or a live meetup. 409 group_completed once it's history.
+// CHANGED wave 3: leaving a live meetup also deletes the leaver's `connections` rows whose event_id is that
+// meetup — the edges it made (End meetup, lobby "We met", QR scans while it was active). A connection that
+// existed before (different or null event_id) is never touched; both edge writers keep the original row on
+// conflict, so event_id always says where an edge was FIRST made.
 POST /api/groups/:id/leave
   → { ok: true }
 

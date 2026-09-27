@@ -4,8 +4,9 @@
 // per-person "We met" (hidden once an edge exists), icebreakers, and "End meetup" (which connects everyone).
 // A matched group keeps accept/decline; once confirmed it gets the same per-person "We met" — completing a
 // matched group no longer connects people by itself.
-// CHANGED Sep 26 (wave 3): "Leave" works at any point, including after it wrapped up — the hangout drops off your
-// list and every connection it formed stays. Meetups get "How did it go?" too. Members are labelled by degree.
+// CHANGED Sep 26 (wave 3): leaving a live meetup undoes only the connections that meetup made for you (edges tagged
+// with its event id); people you already knew stay 1st degree. Both kinds still can't be left once wrapped up.
+// Meetups get "How did it go?" too. Members are labelled by degree.
 import type { Activity, GroupMember } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -52,19 +53,28 @@ function MemberRow({
   canMeet,
   groupId,
   isMeetup,
+  eventId,
 }: {
   member: GroupMember;
   index: number;
   canMeet: boolean;
   groupId: string;
   isMeetup: boolean;
+  eventId: string | null;
 }) {
   const queryClient = useQueryClient();
   const degreeLabel = memberDegreeLabel(member);
   const name = member.degree === 0 ? 'You' : memberDisplayName(member);
   const tone = member.degree === 0 ? 'you' : member.revealed ? 'met' : 'unmet';
+  // A lobby "We met" carries the meetup's event id, so leaving the meetup can undo it (server: leaveGroup). A
+  // pre-existing edge with this person isn't overwritten — the server keeps the original row on conflict.
   const connect = useMutation({
-    mutationFn: () => api.createConnection({ peerId: member.id!, context: isMeetup ? 'event' : 'group' }),
+    mutationFn: () =>
+      api.createConnection({
+        peerId: member.id!,
+        context: isMeetup ? 'event' : 'group',
+        eventId: isMeetup && eventId ? eventId : undefined,
+      }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.group(groupId) });
       void queryClient.invalidateQueries({ queryKey: queryKeys.graph });
@@ -296,9 +306,9 @@ export function GroupScreen() {
   const confirmLeave = () => {
     Alert.alert(
       isMeetup ? 'Leave this meetup?' : 'Leave this group?',
-      isCompleted
-        ? "It leaves your hangouts. Everyone you met here stays in your 1st degree, and your feedback and photos stay with the group."
-        : "You'll drop off the list and lose the chat. Everyone else keeps it — and anyone you've already marked \"We met\" stays in your 1st degree.",
+      isMeetup
+        ? "You'll drop off the list and lose the chat. Connections you made at this meetup are undone — anyone you already knew before stays in your 1st degree."
+        : "You'll drop off the list and lose the chat. Everyone else keeps it, and your 1st degree doesn't change.",
       [
         { text: 'Stay', style: 'cancel' },
         { text: 'Leave', style: 'destructive', onPress: () => leave.mutate() },
@@ -419,6 +429,7 @@ export function GroupScreen() {
                 canMeet={canMeet}
                 groupId={id!}
                 isMeetup={isMeetup}
+                eventId={data.eventId}
               />
             ))}
           </Card>
@@ -471,28 +482,26 @@ export function GroupScreen() {
                 />
               </View>
 
-              <View className="gap-3 pt-2">
-                {!isCompleted ? (
-                  <>
-                    {/* Any member can end it (docs: "host or any member marks the hangout done"). */}
-                    <Button
-                      label={isMeetup ? 'End meetup' : 'Mark hangout as done'}
-                      variant="ghost"
-                      loading={complete.isPending}
-                      onPress={confirmEnd}
-                    />
-                    {complete.isError ? <Muted>{complete.error.message}</Muted> : null}
-                  </>
-                ) : null}
-                <Button
-                  label={isCompleted ? 'Remove from my hangouts' : isMeetup ? 'Leave meetup' : 'Leave group'}
-                  variant="ghost"
-                  icon={<LogOut size={16} color="#20201C" />}
-                  loading={leave.isPending}
-                  onPress={confirmLeave}
-                />
-                {leave.isError ? <Muted>{leave.error.message}</Muted> : null}
-              </View>
+              {!isCompleted ? (
+                <View className="gap-3 pt-2">
+                  {/* Any member can end it (docs: "host or any member marks the hangout done"). */}
+                  <Button
+                    label={isMeetup ? 'End meetup' : 'Mark hangout as done'}
+                    variant="ghost"
+                    loading={complete.isPending}
+                    onPress={confirmEnd}
+                  />
+                  {complete.isError ? <Muted>{complete.error.message}</Muted> : null}
+                  <Button
+                    label={isMeetup ? 'Leave meetup' : 'Leave group'}
+                    variant="ghost"
+                    icon={<LogOut size={16} color="#20201C" />}
+                    loading={leave.isPending}
+                    onPress={confirmLeave}
+                  />
+                  {leave.isError ? <Muted>{leave.error.message}</Muted> : null}
+                </View>
+              ) : null}
             </>
           )}
         </>

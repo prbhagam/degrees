@@ -57,8 +57,8 @@ To test locally without the Supabase CLI, apply the migration to a throwaway Pos
 ## Seeding the shared project
 
 1. Applied on the shared project: `0002`–`0006` (Sep 26; `0006` went live together with PR #14's server, since each breaks the other's predecessor). Verified live: 0006's columns and tables exist, and the 24 seeded feedback rows became `great`.
-   **`0007`, `0008`, and `0009` are written and locally verified but NOT applied.** Apply all three (in order) in the SQL editor before deploying the wave-2 server: the join route needs `events.group_id`, the activity routes write `activities.status` and `activities.job`, and the old server populates none of them. 0007 creates the Storage buckets and policies itself — no dashboard step.
-   **`0010` (wave 3) goes right after them, before the wave-3 server deploys:** the group read orders `activities` by `created_at`, the graph route reads `connection_contacts`, and the app subscribes to `group_members`/`groups` changes.
+   **`0007`–`0009` are applied** (verified Sep 26 ~23:50 UTC: `events.group_id`, `activities.status`, `activities.job` all exist on the shared project).
+   **`0010` (wave 3) is NOT applied yet.** Apply it before the wave-3 server deploys: the group read orders `activities` by `created_at`, the graph route reads `connection_contacts`, and the app subscribes to `group_members`/`groups` changes.
 2. `npm run seed` — re-embeds every profile with Gemini (`gemini-embedding-001`, 768 dims, `SEMANTIC_SIMILARITY`).
    Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY` in the root `.env`. Safe to rerun.
 

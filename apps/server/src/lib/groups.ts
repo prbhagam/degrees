@@ -18,6 +18,7 @@ import {
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from './errors.js';
 import { exploreFrom, profileBasics } from './graph.js';
+import { log } from './log.js';
 
 // Added Sep 26 (wave 2): a meetup's room-code record (the `events` row behind a kind='meetup' group).
 export interface MeetupRow {
@@ -376,21 +377,30 @@ export async function loadGroup(
   };
 }
 
-// Added Sep 26 (wave 2): leave any group you're in. Proposed: same as declining. Confirmed group or live meetup:
-// you drop out; the others keep it.
-// CHANGED Sep 26 (wave 3, Sahith): a completed hangout can be left too — it disappears from your list, and nothing
-// else changes: the connections it formed stay in `connections` (your circle), your feedback stays with the group,
-// and your photos stay in the album. Leaving only ever removes the membership row.
+// Added Sep 26 (wave 2): leave any group you're in that hasn't wrapped up. Proposed: same as declining.
+// Confirmed group or live meetup: you drop out; the others keep it. Completed: it's history (feedback, photos,
+// the edges it formed), so it can't be left.
+//
+// CHANGED Sep 26 (wave 3, Sahith's call from testing): leaving a live meetup undoes ONLY the connections that
+// meetup created for you — the `connections` rows carrying its `event_id` (ending the meetup, a lobby "We met",
+// or a QR scan while it was the active event all write that id). A connection you already had with someone
+// before — from an earlier hangout, a QR scan elsewhere, or the seed — carries a different (or no) event id and is
+// never touched: `POST /connections` and the end-of-meetup upsert both keep the original row on conflict, so an
+// edge's event_id always records where it was FIRST made. Nothing else about the person changes.
 export async function leaveGroup(groupId: string, userId: string): Promise<void> {
   await memberRows(groupId, userId);
+  const { status } = await groupState(groupId);
+  if (status === 'completed') {
+    throw new ApiError(409, 'group_completed', 'This hangout already happened, so it stays in your history.');
+  }
   const db = getServiceClient();
   const { error } = await db.from('group_members').delete().eq('group_id', groupId).eq('user_id', userId);
   if (error) {
     throw new Error(`group_members delete failed: ${error.message}`);
   }
-  // Keep the legacy attendee list in step for meetups (seed/tests still read it).
   const meetup = await meetupForGroup(groupId);
   if (meetup) {
+    // Keep the legacy attendee list in step (seed/tests still read it).
     const { error: attendeeError } = await db
       .from('event_attendees')
       .delete()
@@ -399,6 +409,17 @@ export async function leaveGroup(groupId: string, userId: string): Promise<void>
     if (attendeeError) {
       throw new Error(`event_attendees delete failed: ${attendeeError.message}`);
     }
+    // Only this meetup's edges, only the leaver's. `event_id` scoping is what protects pre-existing connections.
+    const { data: cut, error: cutError } = await db
+      .from('connections')
+      .delete()
+      .eq('event_id', meetup.id)
+      .or(`user_a.eq.${userId},user_b.eq.${userId}`)
+      .select('user_a, user_b');
+    if (cutError) {
+      throw new Error(`connections delete failed: ${cutError.message}`);
+    }
+    log.info('groups.left_meetup', { userId, groupId, eventId: meetup.id, connectionsCut: cut?.length ?? 0 });
   }
 }
 

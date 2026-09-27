@@ -177,6 +177,9 @@ export const groupRoutes = new Hono<AppEnv>()
     const userId = context.get('userId');
     if (env.mockMode) {
       assertMockGroup(groupId);
+      if (mockStatus === 'completed') {
+        throw new ApiError(409, 'group_completed', 'This hangout already happened, so it stays in your history.');
+      }
       mockLeft = true;
       const response = { ok: true } satisfies OkResponse;
       return context.json(response);

@@ -241,6 +241,8 @@ notifications (
 
 **`profile_tags.kind = 'avoid'` is a constraint, not an interest (wave 3).** Every reader splits by kind: the planner turns avoids into hard rules, icebreakers and the match reasoning ignore them, `match_narrow` (redefined in 0010) leaves them out of `interests`, and the embedding puts them on their own "Prefers to skip:" line. Before 0010 they were aggregated with everything else, which is how "avoid alcohol" produced pub recommendations.
 
+**Leaving a meetup undoes only its own edges (wave 3).** `POST /api/groups/:id/leave` on a live meetup deletes the leaver's `connections` rows where `event_id` is that meetup's event. Because `POST /api/connections` and the end-of-meetup upsert both `ON CONFLICT DO NOTHING`, an edge's `event_id` records where it was first made — so a pair that already knew each other keeps their original row and is unaffected. Lobby "We met" taps send `eventId` for exactly this reason. Completed hangouts still can't be left.
+
 **Plans are kept (wave 3).** `activities` holds every plan a group generated; the newest row is the current plan and older `ready` rows are `GroupResponse.activityHistory`. `saveActivity` deletes only `generating`/`failed` placeholders. The planner is told the previous venues so "Suggest something else" can't repeat one.
 
 **Realtime (wave 3):** `group_members` (FULL replica identity, so DELETE events carry `group_id`) and `groups` are in `supabase_realtime`, alongside `messages`, `notifications`, and `activities`. The group screen subscribes to all three with the JWT set on the socket, so a join, a leave, or "End meetup" reaches everyone already there without a refresh.
