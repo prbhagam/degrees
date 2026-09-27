@@ -60,7 +60,7 @@ The loop closes at feedback. Every hangout makes the next match better — that'
 
 ## 3. Onboarding
 
-1. **Sign up** — Supabase auth, username + password. No SSO, no Sign in with Google. **(CHANGED Sep 26)** also collects phone (required — confirms attendees at events) and pronouns (optional); profile photo is optional and can be added later.
+1. **Sign up** — Supabase auth, email + password, plus a username as your @handle **(CHANGED Sep 27: was username + password)**. No SSO, no Sign in with Google. **(CHANGED Sep 26)** also collects phone (required — confirms attendees at events) and pronouns (optional); profile photo is optional and can be added later.
 2. **Interests** — tag-based hobbies and activities (common tags for fast matching, or type your own — a specific tag still saves to your profile, it just may take longer to find a match), plus an optional freeform **"AI paragraph"** the model reads for nuance tags can't carry. Voice input is a nice-to-have, logged as a future direction, not built. Bio is visible **only to 1st-degree connections** (people you've actually met — see §9 on why "matched" no longer means "visible"). **(CHANGED Sep 26)** also an optional **"avoids"** list (e.g. alcohol, late nights, large crowds) the model plans around, same tag pattern as interests.
 3. **Preferences** — cost range · home base + travel distance · match frequency (daily / a few times a week / weekly / biweekly / monthly — widened Sep 26) · **group size range** (min–max, not one number) · **degrees of separation** allowed.
 
@@ -126,7 +126,7 @@ Beat 4 is the point: the app gets smarter from real use, on stage.
 
 - **Resend usage** — assumed transactional only (password reset), with **email verification off** for the demo so venue signups aren't blocked. **Checked Sep 26: "Confirm email" is actually ON**; server-side signup bypasses it, so it only matters if Resend or password reset is added.
 - **Frequency preference** (daily/few times a week/weekly/biweekly/monthly) has no scheduler in a 36-hour build. Store it, honor it in copy, don't build cron.
-- ~~**Login is spec'd as "username + password" but implemented against Supabase Auth's email/password.**~~ **Resolved Sep 26:** username + password. A username maps to `<username>@degrees.demo`, and signup goes through `POST /api/auth/signup` (the project's email confirmation made client-side signup impossible).
+- ~~**Login is spec'd as "username + password" but implemented against Supabase Auth's email/password.**~~ **Resolved Sep 26:** username + password. A username maps to `<username>@degrees.demo`, and signup goes through `POST /api/auth/signup` (the project's email confirmation made client-side signup impossible). **Revised Sep 27:** real email + password; `@degrees.demo` now means "seeded demo account" only, so the demo can be purged and restored with the scripts in `supabase/scripts/`.
 
 **Resolved Sep 26 (were open, now decided):**
 

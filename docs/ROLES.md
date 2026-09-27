@@ -40,7 +40,7 @@ The server everything else depends on, and the deploy pipeline that makes it rea
 Everything from signup to a complete profile, plus the feedback loop.
 
 - H0–H2: shared component kit on the Expo scaffold (`apps/mobile`, already routed) — the "build once" burst everyone consumes
-- Supabase auth screens (username + password)
+- Supabase auth screens (email + password)
 - **Interests page** — tag selection (common tags + type-your-own), bio, optional AI paragraph
 - **About page** *(Added Sep 26)* — bio, AI-paragraph-to-tags, optional "avoids" list
 - **Preferences page** — cost, distance, frequency, **group size range**, **degrees of separation**
@@ -85,7 +85,7 @@ Written after PR #14 merged, from a full test pass. Local suite green: typecheck
 
 ### Decisions for the team (make these first)
 
-1. ~~**Username or email login?**~~ **Implemented as username** (auth PR, Sep 26), following the PRD and the seeded demo logins. Easy to revisit if the team prefers email.
+1. ~~**Username or email login?**~~ **Email** (Sep 27). Was username (auth PR, Sep 26) mapped to `<username>@degrees.demo`; switched so demo accounts can be purged by domain for a real environment.
 2. **Does one member's accept confirm the group for everyone?** Right now yes, and confirming reveals every member to every other member. Recommendation: keep it for the demo and write it down. Per-member accepts are more work than the time left.
 3. **Photos and notifications: build or cut from the demo?** Recommendation: build a few notifications (they make the demo feel alive), and cut photo upload unless Pranav finishes Wave 1 early.
 

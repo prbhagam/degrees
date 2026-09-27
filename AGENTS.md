@@ -76,7 +76,7 @@ No `.env` is needed to start. The server runs in **mock mode**, accepting any be
 6. **`connections` stores each edge once**, with `user_a < user_b`. Sort the pair before inserting or the degree math breaks.
 7. **Group size is a soft constraint.** Best effort, not a hard filter.
 8. **Money is integer cents.** Never floats.
-9. **No auth shortcuts.** Supabase username + password, no SSO. (An earlier draft proposed skipping auth entirely — that was reversed.) Auth runs on email + password under the hood: a username maps to `<username>@degrees.demo` (`authEmailFor()` in `@degrees/shared`), which is how the seeded demo logins work. Signup goes through `POST /api/auth/signup`, which creates the confirmed auth user and the `profiles` row. Never call `supabase.auth.signUp` from the app: the project requires email confirmation, which `@degrees.demo` addresses can't complete.
+9. **No auth shortcuts.** Supabase email + password, no SSO. (An earlier draft proposed skipping auth entirely — that was reversed.) **CHANGED Sep 27:** people sign up and log in with their real email, stored as-is as the auth email; the username is only the @handle (it used to map to `<username>@degrees.demo`). `@degrees.demo` is reserved for the 60 seeded demo accounts and signup rejects it, so `supabase/scripts/purge_demo_users.sql` removes every demo account in one run and `restore_demo_users.sql` brings them back (see [supabase/AGENTS.md](./supabase/AGENTS.md#demo-accounts-prod-vs-testing)). Signup goes through `POST /api/auth/signup`, which creates the confirmed auth user and the `profiles` row. Never call `supabase.auth.signUp` from the app: the project requires email confirmation, and its built-in mailer is rate-limited.
 10. **Secrets never enter git.** `.env.example` only; real keys live in server env only. `EXPO_PUBLIC_*` values ship inside the app bundle, so only the Supabase publishable (anon) key may go there.
 
 ---
@@ -108,6 +108,6 @@ No `.env` is needed to start. The server runs in **mock mode**, accepting any be
 - `formGroups` reasoning names people the redaction hides.
 - `message_received` / `feedback_prompt` notifications have no writer (the rest are written since wave 5); the About screen's "Generate tags" is canned.
 
-**Auth (Sep 26):** username signup and login work end to end: signup → onboarding → app. The app is gated: signed-out visits go to login and return to the link they opened (e.g. a scanned event QR) afterwards.
+**Auth (Sep 26; email login Sep 27, not deployed):** signup and login work end to end: signup → onboarding → app. The app is gated: signed-out visits go to login and return to the link they opened (e.g. a scanned event QR) afterwards.
 
 **Open questions** are at the end of [PRD.md](./PRD.md): Resend usage and the frequency scheduler. The graph view is resolved (Your Circle). [HANDOFF-SKELETON.md](./HANDOFF-SKELETON.md) is the original web-era brief, kept for history.

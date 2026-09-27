@@ -35,7 +35,7 @@ Items marked **(meeting)** were decided in the Sep 25 architecture meeting. Item
 | HTTP framework | Hono (`@hono/node-server`), run with `tsx` | *(skeleton)* — TS-first and tiny; no compile step |
 | Database | **Supabase Postgres** | **(meeting)** |
 | Vectors | **pgvector** | **(meeting)** |
-| Auth | **Supabase Auth, username + password** | **(meeting)** — no SSO, no Sign in with Google |
+| Auth | **Supabase Auth, email + password** (username is the @handle; changed Sep 27) | **(meeting)** — no SSO, no Sign in with Google |
 | Email | **Resend** (free tier) | **(meeting)** — transactional only; verification **off** for the demo |
 | Reverse proxy | nginx + Let's Encrypt | *(proposed)* |
 

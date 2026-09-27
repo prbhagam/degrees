@@ -1,8 +1,10 @@
-// Owner: Charles (Onboarding & Profile) — see docs/ROLES.md. Username login + post-login routing wired by Sahith (Sep 26).
+// Owner: Charles (Onboarding & Profile) — see docs/ROLES.md. Login + post-login routing wired by Sahith (Sep 26).
+// CHANGED Sep 27: log in with your email (it used to be a username mapped to `<username>@degrees.demo`). The seeded
+// demo accounts log in with their full address, e.g. maya.chen@degrees.demo.
 // CHANGED Sep 26 (wave 2): password show/hide (Field); entering the app collapses the auth stack (enterApp) so a
 // swipe from the left edge can't return here; a device that skipped onboarding goes straight in.
 import { useState } from 'react';
-import { authEmailFor } from '@degrees/shared';
+import { emailSchema } from '@degrees/shared';
 import { useMutation } from '@tanstack/react-query';
 import { Link, Stack, useRouter } from 'expo-router';
 import { Text, View } from 'react-native';
@@ -15,7 +17,7 @@ import { useSessionStore } from '@/stores/session';
 export function LoginScreen() {
   const router = useRouter();
   const setCurrentUser = useSessionStore((state) => state.setCurrentUser);
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   const login = useMutation({
@@ -23,13 +25,17 @@ export function LoginScreen() {
       // No Supabase project configured (mock-mode dev): api.ts already sends a fixed dev token,
       // so there's nothing to authenticate against — just load the mock `me` and continue.
       if (!isSupabaseEnvironmentUnset()) {
+        const parsedEmail = emailSchema.safeParse(email);
+        if (!parsedEmail.success) {
+          throw new Error(parsedEmail.error.issues[0]?.message ?? 'Enter a valid email address.');
+        }
         const { error } = await getSupabaseClient().auth.signInWithPassword({
-          email: authEmailFor(username),
+          email: parsedEmail.data,
           password,
         });
         if (error) {
           throw new Error(
-            error.code === 'invalid_credentials' ? 'Wrong username or password.' : error.message,
+            error.code === 'invalid_credentials' ? 'Wrong email or password.' : error.message,
           );
         }
       }
@@ -58,13 +64,15 @@ export function LoginScreen() {
 
         <View className="gap-4">
           <Field
-            label="Username"
-            value={username}
-            onChangeText={setUsername}
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
             autoCapitalize="none"
             autoCorrect={false}
-            textContentType="username"
-            placeholder="maya.chen"
+            autoComplete="email"
+            keyboardType="email-address"
+            textContentType="emailAddress"
+            placeholder="you@example.com"
           />
           <Field
             label="Password"
