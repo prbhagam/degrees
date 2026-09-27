@@ -77,10 +77,12 @@ const RING_GROWN = { left: D_CENTER.x - D_POSE.height / 2, top: D_CENTER.y - D_P
 const MORPH_MS = 900;
 const SETTLE_MS = 400;
 const EASE = Easing.inOut(Easing.cubic);
-// The destination shape doesn't start fading in until the departing shape is already well underway — sharing
-// the same timeline start would let the two cancel out visually (identical pixels crossfading at the same spot
-// reads as "nothing moved"). This gives the departure a clear head start before the arrival catches up.
-const STABLE_DELAY = 0.4;
+// The morph is two distinct beats, not one blended crossfade: first the departing shape physically moves and
+// shrinks/grows at FULL opacity (nothing else on screen to dilute it, so the motion is unmistakable) — only
+// once it's finished travelling does it fade out, while the arriving shape fades in at its fixed destination.
+// A single continuous move+fade made the two cancel out visually (a moving-but-fading shape next to a
+// fading-in duplicate reads as "nothing happened"); this way there's always exactly one clear thing to look at.
+const MOVE_FRACTION = 0.6;
 
 export function DegreesMark({
   size = 48,
@@ -121,43 +123,44 @@ export function DegreesMark({
     'worklet';
     return frac * size;
   };
-  // Raw (unstaggered), eased progress through the morph (0..1) — held at 0 before it starts, at 1 after it ends.
-  // Drives the departing (transitional) shapes: they move and fade across the FULL morph, so the motion reads
-  // clearly before anything else shows up on top of it.
-  const morphT = () => {
-    'worklet';
-    return EASE(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
-  };
-  // The arriving (stable) shapes' progress: the same morph window, but starting STABLE_DELAY late, so they only
-  // begin fading in once the departure is already visibly underway.
-  const stableT = () => {
+  // moveT: eased 0..1 over the first MOVE_FRACTION of the morph, then held at 1 — drives the departing shape's
+  // box. It travels at full opacity (see useTransitionalStyle), so the motion itself is never diluted.
+  const moveT = () => {
     'worklet';
     const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
-    return EASE(interpolate(raw, [STABLE_DELAY, 1], [0, 1], Extrapolation.CLAMP));
+    return EASE(interpolate(raw, [0, MOVE_FRACTION], [0, 1], Extrapolation.CLAMP));
+  };
+  // fadeT: 0 until the move finishes, then eases 0..1 over the remainder of the morph. Drives the departing
+  // shape's fade-out (1 - fadeT) and the arriving shape's fade-in (fadeT) — one clean handoff, not a blend.
+  const fadeT = () => {
+    'worklet';
+    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
+    return EASE(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
   };
 
-  // Transitional element: box + opacity driven by the same eased morph progress, fading OUT as it travels from
-  // `from` toward `to`. Colour is fixed per element (see file header) — the gradient is the crossfade itself.
+  // Transitional element: moves box from `from` to `to` at full opacity, THEN fades out once it arrives.
+  // Colour is fixed per element (see file header) — the gradient is the crossfade itself.
   const useTransitionalStyle = (from: typeof D_POSE, to: typeof D_POSE) =>
     useAnimatedStyle(() => {
-      const t = morphT();
+      const t = moveT();
       return {
         position: 'absolute',
         left: px(from.left + t * (to.left - from.left)),
         top: px(from.top + t * (to.top - from.top)),
         width: px(from.width + t * (to.width - from.width)),
         height: px(from.height + t * (to.height - from.height)),
-        opacity: 1 - t,
+        opacity: 1 - fadeT(),
       };
     });
-  const fadeInStyle = useAnimatedStyle(() => ({ opacity: stableT() }));
+  const fadeInStyle = useAnimatedStyle(() => ({ opacity: fadeT() }));
 
-  // The stable ring: fades in ember at PARK partway through the morph, then sweeps halfway to its resting spot.
+  // The stable ring: fades in ember at PARK once the departing shapes finish moving, then sweeps halfway to its
+  // resting spot.
   const ringOrbitStyle = useAnimatedStyle(() => {
     const orbitT = EASE(interpolate(master.value, [mMorph, mOrbit], [0, 1], Extrapolation.CLAMP));
     const angle = PARK_ANGLE - 180 * orbitT;
     const box = polarBox(px(D_CENTER.x), px(D_CENTER.y), px(ORBIT_R), angle, px(RING_SIZE));
-    return { position: 'absolute', ...box, opacity: stableT() };
+    return { position: 'absolute', ...box, opacity: fadeT() };
   });
 
   const dShrinkingStyle = useTransitionalStyle(D_POSE, D_SHRUNK);

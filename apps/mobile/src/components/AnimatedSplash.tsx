@@ -1,10 +1,11 @@
 // Owner: shared mobile scaffold (Charles). The animated splash: paper background, starting completely blank —
-// no logo, nothing drawn (app.json's native splash is blank too, so there's no pop at handoff). A cursor types
-// the "d", then the degree ring, directly into place (a left-to-right reveal, not separate caption text — the
-// mark itself is what's "typed", so there's only ever one logo on screen). Once both are drawn, that becomes
-// exactly DegreesMark's resting pose, so the swap to <DegreesMark animated loop={false}> is pixel-for-pixel: it
-// runs its shrink/grow/orbit cycle once, then the whole thing lifts to reveal the app underneath. Runs once per
-// cold start; never blocks — the app renders from frame one.
+// no logo, nothing drawn (app.json's native splash is blank too, so there's no pop at handoff). A cursor blinks,
+// then the "d" strikes in at full size in one instant (opacity snaps in, a quick spring-bounce sells the
+// "keystroke"), the cursor jumps to the ring's spot and blinks there, then the ring strikes in the same way —
+// the mark itself is what's "typed" (there's only ever one logo on screen, never separate caption text). Once
+// both are struck, that's exactly DegreesMark's resting pose, so the swap to <DegreesMark animated loop={false}>
+// is pixel-for-pixel: it runs its shrink/grow/orbit cycle once, then the whole thing lifts to reveal the app
+// underneath. Runs once per cold start; never blocks — the app renders from frame one.
 import { useEffect, useState } from 'react';
 import { Image, StyleSheet } from 'react-native';
 import Animated, {
@@ -15,6 +16,7 @@ import Animated, {
   withDelay,
   withRepeat,
   withSequence,
+  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { DegreesMark, D_POSE, RING_TOPRIGHT, INK, EMBER } from './DegreesMark';
@@ -26,14 +28,9 @@ const ringGlyph = require('../../assets/brand/degree-ring.png');
 // native splash is left blank on purpose, see app.json.)
 const MARK_SIZE = 132;
 const ORBIT_MS = 1000;
-const REVEAL_D_MS = 600;
-const REVEAL_GAP_MS = 180;
-const REVEAL_RING_MS = 380;
-const TYPE_HOLD_MS = 400; // lets the cursor blink a couple of times before the mark takes over
-// Stepped, not smooth: a continuous width wipe reads as a swipe, not typing. Snapping through a handful of
-// discrete jumps — like the letter arriving stroke by stroke — is what makes it read as typed.
-const D_STEPS = 5;
-const RING_STEPS = 3;
+const CURSOR_LEAD_MS = 350; // cursor blinks alone first, like it's about to type
+const GAP_MS = 350; // cursor sits at the ring's spot before it strikes
+const TYPE_HOLD_MS = 450; // lets the cursor blink a couple more times before the mark takes over
 
 type Phase = 'typing' | 'graphic';
 
@@ -44,26 +41,32 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
     return frac * MARK_SIZE;
   };
 
-  const dReveal = useSharedValue(0); // 0..1
-  const ringReveal = useSharedValue(0); // 0..1
-  const cursor = useSharedValue(0);
+  const dOpacity = useSharedValue(0);
+  const dScale = useSharedValue(1.5);
+  const ringOpacity = useSharedValue(0);
+  const ringScale = useSharedValue(1.5);
+  const cursorAtRing = useSharedValue(0); // 0: waiting at the d's spot, 1: waiting at the ring's spot
+  const cursorBlink = useSharedValue(1);
   const typingOpacity = useSharedValue(1);
   const lift = useSharedValue(0);
 
   useEffect(() => {
-    cursor.value = withRepeat(
+    cursorBlink.value = withRepeat(
       withSequence(withTiming(1, { duration: 0 }), withDelay(430, withTiming(0, { duration: 0 })), withDelay(430, withTiming(1, { duration: 0 }))),
       -1,
     );
-    dReveal.value = withTiming(1, { duration: REVEAL_D_MS, easing: Easing.steps(D_STEPS, true) });
-    ringReveal.value = withDelay(
-      REVEAL_D_MS + REVEAL_GAP_MS,
-      withTiming(1, { duration: REVEAL_RING_MS, easing: Easing.steps(RING_STEPS, true) }),
-    );
+    // Struck all at once, like a keystroke: opacity snaps in and a quick overshoot spring sells the "click".
+    dOpacity.value = withDelay(CURSOR_LEAD_MS, withTiming(1, { duration: 1 }));
+    dScale.value = withDelay(CURSOR_LEAD_MS, withSpring(1, { damping: 9, stiffness: 280 }));
+    cursorAtRing.value = withDelay(CURSOR_LEAD_MS, withTiming(1, { duration: 0 }));
+
+    ringOpacity.value = withDelay(CURSOR_LEAD_MS + GAP_MS, withTiming(1, { duration: 1 }));
+    ringScale.value = withDelay(CURSOR_LEAD_MS + GAP_MS, withSpring(1, { damping: 9, stiffness: 280 }));
+
     const t = setTimeout(() => {
       typingOpacity.value = withTiming(0, { duration: 150 });
       setPhase('graphic');
-    }, REVEAL_D_MS + REVEAL_GAP_MS + REVEAL_RING_MS + TYPE_HOLD_MS);
+    }, CURSOR_LEAD_MS + GAP_MS + TYPE_HOLD_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -79,15 +82,13 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
     transform: [{ translateY: -lift.value * 60 }, { scale: 1 - lift.value * 0.15 }],
   }));
   const typingStyle = useAnimatedStyle(() => ({ opacity: typingOpacity.value }));
-  const dRevealStyle = useAnimatedStyle(() => ({ width: px(D_POSE.width) * dReveal.value }));
-  const ringRevealStyle = useAnimatedStyle(() => ({ width: px(RING_TOPRIGHT.width) * ringReveal.value }));
+  const dStyle = useAnimatedStyle(() => ({ opacity: dOpacity.value, transform: [{ scale: dScale.value }] }));
+  const ringStyle = useAnimatedStyle(() => ({ opacity: ringOpacity.value, transform: [{ scale: ringScale.value }] }));
   const cursorStyle = useAnimatedStyle(() => {
-    const typingRing = ringReveal.value > 0;
-    const box = typingRing ? RING_TOPRIGHT : D_POSE;
-    const revealW = typingRing ? ringReveal.value * px(box.width) : dReveal.value * px(box.width);
+    const box = cursorAtRing.value > 0.5 ? RING_TOPRIGHT : D_POSE;
     return {
-      opacity: cursor.value,
-      left: px(box.left) + revealW,
+      opacity: cursorBlink.value,
+      left: px(box.left),
       top: px(box.top),
       height: px(box.height),
     };
@@ -100,12 +101,14 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
           <DegreesMark size={MARK_SIZE} animated loop={false} orbitMs={ORBIT_MS} onDone={handleGraphicDone} />
         ) : (
           <Animated.View style={typingStyle}>
-            {/* The mark being typed in, left to right — the only logo on screen. */}
-            <Animated.View style={[styles.revealBox, { left: px(D_POSE.left), top: px(D_POSE.top), height: px(D_POSE.height) }, dRevealStyle]}>
-              <Image source={dGlyph} resizeMode="contain" style={{ width: px(D_POSE.width), height: px(D_POSE.height), tintColor: INK }} />
+            {/* The mark being struck in, one glyph at a time — the only logo on screen. */}
+            <Animated.View style={[styles.glyph, { left: px(D_POSE.left), top: px(D_POSE.top), width: px(D_POSE.width), height: px(D_POSE.height) }, dStyle]}>
+              <Image source={dGlyph} resizeMode="contain" style={{ width: '100%', height: '100%', tintColor: INK }} />
             </Animated.View>
-            <Animated.View style={[styles.revealBox, { left: px(RING_TOPRIGHT.left), top: px(RING_TOPRIGHT.top), height: px(RING_TOPRIGHT.height) }, ringRevealStyle]}>
-              <Image source={ringGlyph} resizeMode="contain" style={{ width: px(RING_TOPRIGHT.width), height: px(RING_TOPRIGHT.height), tintColor: EMBER }} />
+            <Animated.View
+              style={[styles.glyph, { left: px(RING_TOPRIGHT.left), top: px(RING_TOPRIGHT.top), width: px(RING_TOPRIGHT.width), height: px(RING_TOPRIGHT.height) }, ringStyle]}
+            >
+              <Image source={ringGlyph} resizeMode="contain" style={{ width: '100%', height: '100%', tintColor: EMBER }} />
             </Animated.View>
             <Animated.View style={[styles.cursor, cursorStyle]} />
           </Animated.View>
@@ -123,8 +126,6 @@ const styles = StyleSheet.create({
     zIndex: 100,
     elevation: 100,
   },
-  // overflow:hidden + an animated width is the reveal: the image inside is full size and fixed, only the
-  // window onto it grows.
-  revealBox: { position: 'absolute', overflow: 'hidden' },
+  glyph: { position: 'absolute' },
   cursor: { position: 'absolute', width: 3, backgroundColor: '#20201C' },
 });
