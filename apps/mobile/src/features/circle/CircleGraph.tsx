@@ -10,10 +10,12 @@
 //   * only you (the ember 0°) can be dragged. Push into people and they're shoved aside, knock into their neighbours,
 //     flash, tap the phone, and settle back home. Let go and you drift back to the middle.
 // Tap anyone to open their card. Nothing is written anywhere. Scope + v2 ideas: docs/PLAYGROUND.md.
+// CHANGED Sep 27 (Sahith): nodes show profile photos (yours too), falling back to initials when there's none or it
+// fails to load — the map used to draw initials for everyone even when the list next to it had their picture.
 import type { GraphResponse } from '@degrees/shared';
 import * as Haptics from 'expo-haptics';
-import { useEffect, useMemo } from 'react';
-import { Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Image, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   makeMutable,
@@ -94,6 +96,32 @@ function Edge({ from, to, line }: { from: Body; to: Body; line: Line }) {
   );
 }
 
+// A photo that fell over (bad URL, offline) goes back to initials instead of a blank circle.
+function NodeFace({
+  name,
+  photoUrl,
+  size,
+  textColor,
+}: {
+  name: string;
+  photoUrl: string | null;
+  size: number;
+  textColor: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (photoUrl && !failed) {
+    return (
+      <Image
+        source={{ uri: photoUrl }}
+        onError={() => setFailed(true)}
+        accessibilityLabel={name}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+      />
+    );
+  }
+  return <Text style={{ fontFamily: 'PublicSans_700Bold', fontSize: 12, color: textColor }}>{initials(name)}</Text>;
+}
+
 function Person({ node, body, selected }: { node: Node; body: Body; selected: boolean }) {
   const style = useAnimatedStyle(() => ({
     transform: [
@@ -103,6 +131,7 @@ function Person({ node, body, selected }: { node: Node; body: Body; selected: bo
     ],
     borderColor: body.hit.value > 0.4 || selected ? '#E8703A' : '#20201C',
   }));
+  const border = selected ? 2 : 1.5;
   return (
     <Animated.View
       style={[
@@ -112,9 +141,10 @@ function Person({ node, body, selected }: { node: Node; body: Body; selected: bo
           height: R * 2,
           borderRadius: R,
           backgroundColor: selected ? '#20201C' : '#FFFFFF',
-          borderWidth: selected ? 2 : 1.5,
+          borderWidth: border,
           alignItems: 'center',
           justifyContent: 'center',
+          overflow: 'hidden',
           shadowColor: '#20201C',
           shadowOffset: { width: 0, height: 4 },
           shadowRadius: 8,
@@ -123,14 +153,12 @@ function Person({ node, body, selected }: { node: Node; body: Body; selected: bo
         style,
       ]}
     >
-      <Text style={{ fontFamily: 'PublicSans_700Bold', fontSize: 12, color: selected ? '#F7F3EC' : '#20201C' }}>
-        {initials(node.displayName)}
-      </Text>
+      <NodeFace name={node.displayName} photoUrl={node.photoUrl} size={R * 2 - border * 2} textColor={selected ? '#F7F3EC' : '#20201C'} />
     </Animated.View>
   );
 }
 
-function Me({ body }: { body: Body }) {
+function Me({ body, photoUrl }: { body: Body; photoUrl: string | null }) {
   const style = useAnimatedStyle(() => ({
     transform: [
       { translateX: body.x.value - body.r },
@@ -148,8 +176,12 @@ function Me({ body }: { body: Body }) {
           height: ME_R * 2,
           borderRadius: ME_R,
           backgroundColor: '#E8703A',
+          // With a photo the ember shows as a ring around it; without one it's the ember disc with 0°.
+          borderWidth: photoUrl ? 3 : 0,
+          borderColor: '#E8703A',
           alignItems: 'center',
           justifyContent: 'center',
+          overflow: 'hidden',
           shadowColor: '#20201C',
           shadowOffset: { width: 0, height: 6 },
           shadowRadius: 10,
@@ -157,7 +189,7 @@ function Me({ body }: { body: Body }) {
         style,
       ]}
     >
-      <Text style={{ fontFamily: 'PublicSans_700Bold', fontSize: 12, color: '#F7F3EC' }}>0°</Text>
+      <NodeFace name="You" photoUrl={photoUrl} size={ME_R * 2 - 6} textColor="#F7F3EC" />
     </Animated.View>
   );
 }
@@ -170,6 +202,7 @@ export function CircleGraph({
   selectedId,
   onSelect,
   onBump,
+  mePhotoUrl = null,
 }: {
   nodes: Node[];
   mutualEdges: { a: string; b: string }[];
@@ -178,6 +211,8 @@ export function CircleGraph({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onBump?: (name: string) => void;
+  // Your own profile photo for the 0° node (null → the ember disc).
+  mePhotoUrl?: string | null;
 }) {
   const cx = width / 2;
   const cy = height / 2;
@@ -402,7 +437,7 @@ export function CircleGraph({
         {nodes.map((node, index) => (
           <Person key={node.id} node={node} body={bodies[index + 1]!} selected={node.id === selectedId} />
         ))}
-        <Me body={bodies[0]!} />
+        <Me body={bodies[0]!} photoUrl={mePhotoUrl} />
       </View>
     </GestureDetector>
   );
