@@ -1,62 +1,81 @@
-// Owner: shared mobile scaffold (Charles) — Added Sep 26 (wave 4). The animated splash: paper background, the
-// Degrees mark settling into place while the node orbits, the wordmark fading in, then the whole thing lifts to
-// reveal the app. Runs once per cold start, right after the native splash hides, so the handoff is seamless.
-// Never blocks — the app renders underneath from frame one.
-// CHANGED Sep 26 (wave 5, Sahith): the native splash now shows the SAME mark (assets/images/splash-icon.png at
-// 132pt, see app.json), so this starts with the mark already drawn exactly where the OS left it — no pop. From
-// there the logo comes alive: the node makes a lap, the rings ripple after it, the wordmark rises, then it lifts.
-import { useEffect } from 'react';
-import { StyleSheet, Text } from 'react-native';
+// Owner: shared mobile scaffold (Charles). The animated splash: paper background, starting from the exact
+// pixels the native splash left on screen (assets/images/splash-icon.png at 132pt, see app.json) — no pop.
+// A cursor types "d" then "°" beneath the mark, then the mark itself runs its shrink/grow/orbit cycle once
+// (DegreesMark's `loop={false}`), then the whole thing lifts to reveal the app. Runs once per cold start;
+// never blocks — the app renders underneath from frame one.
+import { useEffect, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
+  withRepeat,
+  withSequence,
   withTiming,
 } from 'react-native-reanimated';
 import { DegreesMark } from './DegreesMark';
 
 // Must match app.json → expo-splash-screen imageWidth so the handoff is pixel-for-pixel.
 const MARK_SIZE = 132;
-const ORBIT_MS = 1300;
-const HOLD_MS = 1500;
+const ORBIT_MS = 1000;
+const TYPE_D_MS = 250;
+const TYPE_RING_MS = 300;
+const TYPE_HOLD_MS = 500; // lets the cursor blink a couple of times before the mark takes over
+
+type Phase = 'typing' | 'graphic' | 'done';
 
 export function AnimatedSplash({ onDone }: { onDone: () => void }) {
-  const word = useSharedValue(0);
+  const [phase, setPhase] = useState<Phase>('typing');
+  const [typedCount, setTypedCount] = useState(0);
+  const cursor = useSharedValue(1);
+  const typedOpacity = useSharedValue(1);
   const lift = useSharedValue(0);
 
   useEffect(() => {
-    word.value = withDelay(300, withTiming(1, { duration: 550, easing: Easing.out(Easing.quad) }));
-    lift.value = withDelay(
-      HOLD_MS,
-      withTiming(1, { duration: 450, easing: Easing.in(Easing.cubic) }, (finished) => {
-        if (finished) runOnJS(onDone)();
-      }),
+    cursor.value = withRepeat(
+      withSequence(withTiming(0, { duration: 0 }), withDelay(430, withTiming(1, { duration: 0 })), withDelay(430, withTiming(0, { duration: 0 }))),
+      -1,
     );
-  }, [lift, onDone, word]);
+    const t1 = setTimeout(() => setTypedCount(1), TYPE_D_MS);
+    const t2 = setTimeout(() => setTypedCount(2), TYPE_D_MS + TYPE_RING_MS);
+    const t3 = setTimeout(() => {
+      typedOpacity.value = withTiming(0, { duration: 200 });
+      setPhase('graphic');
+    }, TYPE_D_MS + TYPE_RING_MS + TYPE_HOLD_MS);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const overlay = useAnimatedStyle(() => ({
-    opacity: 1 - lift.value,
-  }));
+  const handleGraphicDone = () => {
+    lift.value = withTiming(1, { duration: 450, easing: Easing.in(Easing.cubic) }, (finished) => {
+      if (finished) runOnJS(onDone)();
+    });
+  };
+
+  const overlayStyle = useAnimatedStyle(() => ({ opacity: 1 - lift.value }));
   const markStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: -lift.value * 60 }, { scale: 1 - lift.value * 0.15 }],
   }));
-  const wordStyle = useAnimatedStyle(() => ({
-    opacity: word.value * (1 - lift.value),
-    transform: [{ translateY: (1 - word.value) * 10 - lift.value * 60 }],
-  }));
+  const typedStyle = useAnimatedStyle(() => ({ opacity: typedOpacity.value }));
+  const cursorStyle = useAnimatedStyle(() => ({ opacity: cursor.value }));
 
   return (
-    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.overlay, overlay]}>
+    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.overlay, overlayStyle]}>
       <Animated.View style={markStyle}>
-        <DegreesMark size={MARK_SIZE} animated orbitMs={ORBIT_MS} />
+        <DegreesMark size={MARK_SIZE} animated={phase === 'graphic'} loop={false} orbitMs={ORBIT_MS} onDone={handleGraphicDone} />
       </Animated.View>
-      <Animated.View style={[styles.wordmark, wordStyle]}>
-        <Text style={styles.word}>
-          Degrees<Text style={styles.degree}>°</Text>
-        </Text>
-        <Text style={styles.tagline}>Real friends, a few degrees apart.</Text>
+      <Animated.View style={[styles.typed, typedStyle]}>
+        <View style={styles.typedRow}>
+          <Text style={styles.word}>{typedCount >= 1 ? 'd' : ''}</Text>
+          <Text style={[styles.word, styles.degree]}>{typedCount >= 2 ? '°' : ''}</Text>
+          <Animated.View style={[styles.cursor, cursorStyle]} />
+        </View>
       </Animated.View>
     </Animated.View>
   );
@@ -70,9 +89,10 @@ const styles = StyleSheet.create({
     zIndex: 100,
     elevation: 100,
   },
-  // The wordmark sits below the mark without moving it: absolute, so the mark stays where the native image was.
-  wordmark: { position: 'absolute', top: '50%', marginTop: MARK_SIZE / 2 + 22, alignItems: 'center', gap: 6 },
+  // Sits below the mark without moving it: absolute, so the mark stays exactly where the native image was.
+  typed: { position: 'absolute', top: '50%', marginTop: MARK_SIZE / 2 + 22, alignItems: 'center' },
+  typedRow: { flexDirection: 'row', alignItems: 'flex-end' },
   word: { fontFamily: 'Fraunces_700Bold', fontSize: 34, color: '#20201C', letterSpacing: -0.5 },
   degree: { color: '#E8703A' },
-  tagline: { fontFamily: 'PublicSans_500Medium', fontSize: 14, color: '#8A8378' },
+  cursor: { width: 3, height: 30, marginLeft: 3, marginBottom: 3, backgroundColor: '#20201C' },
 });
