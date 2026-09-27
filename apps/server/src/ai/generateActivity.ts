@@ -210,6 +210,25 @@ function milesBetween(
   return 2 * EARTH_RADIUS_MI * Math.asin(Math.sqrt(h));
 }
 
+export function isRateLimitError(error: unknown): boolean {
+  if (!error) return false;
+  const anyErr = error as any;
+  if (anyErr.status === 429 || anyErr.status === 'RESOURCE_EXHAUSTED' || anyErr.code === 429) {
+    return true;
+  }
+  if (anyErr.error?.code === 429 || anyErr.error?.status === 'RESOURCE_EXHAUSTED') {
+    return true;
+  }
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : JSON.stringify(error);
+  return (
+    message.includes('429') ||
+    message.includes('RESOURCE_EXHAUSTED') ||
+    message.includes('exceeded your current quota') ||
+    message.includes('rate limit') ||
+    message.includes('Rate limit')
+  );
+}
+
 // Try Flash, then Lite: an overloaded model should cost a second, not the plan. `reserveMs` is time a later
 // step needs, which neither attempt may spend.
 async function withModelFallback<T>(
@@ -223,6 +242,9 @@ async function withModelFallback<T>(
       timeoutSignal(budget(reserveMs + LITE_RESERVE_MS)),
     );
   } catch (error) {
+    if (isRateLimitError(error)) {
+      throw error;
+    }
     console.warn(
       `[generateActivity] ${FLASH_MODEL} failed; retrying with ${FLASH_LITE_MODEL}`,
       error,
@@ -614,6 +636,9 @@ export async function generateActivity(
   try {
     return await fromMaps(input, budget);
   } catch (error) {
+    if (isRateLimitError(error)) {
+      throw error;
+    }
     console.warn(
       '[generateActivity] Maps-grounded plan failed; trying Ticketmaster',
       error,
@@ -634,6 +659,8 @@ export interface StageResult {
   job: ActivityJob;
   // Non-null exactly when the job has finished: the plan to save as 'ready'.
   activity: Activity | null;
+  // Set to true when the job failed permanently (e.g. rate limit exhausted) and should not fall back or retry.
+  failed?: boolean;
 }
 
 const NEXT_ON_FAILURE: Record<ActivityJobStage, ActivityJobStage> = {
@@ -658,6 +685,16 @@ export async function runActivityStage(
   const fail = (error: unknown): StageResult => {
     const message = error instanceof Error ? error.message : String(error);
     const errors = [...job.errors, `${stage}: ${message}`].slice(-8);
+
+    if (isRateLimitError(error)) {
+      log.error('activity.stage.ratelimit', error, { stage, message });
+      return {
+        job: { ...job, updatedAt: now(), errors },
+        activity: null,
+        failed: true,
+      };
+    }
+
     // wave 5: a plan that broke a preference gets another grounded attempt with the rejection in the prompt,
     // rather than handing the group a Ticketmaster event (or the fixture) for a limit the model can meet.
     if (

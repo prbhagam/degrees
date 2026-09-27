@@ -160,6 +160,8 @@ function ActivityPreview({
     : 'No time yet — propose one';
   const isGenerating =
     activity?.status === 'generating' || activityStatus === 'generating';
+  const isFailed =
+    activity?.status === 'failed' || activityStatus === 'failed';
 
   if (isGenerating) {
     return (
@@ -186,6 +188,19 @@ function ActivityPreview({
             </View>
             <ChevronRight size={20} color="#8A8378" />
           </View>
+        </Card>
+      </Pressable>
+    );
+  }
+
+  if (isFailed && !activity) {
+    return (
+      <Pressable onPress={onPress} accessibilityRole="button">
+        <Card className="border-line bg-paper-raised">
+          <Heading>The plan</Heading>
+          <Body>Couldn't generate plan due to AI rate limits or quota.</Body>
+          <Muted>{whenLine}</Muted>
+          <Button label="View & retry" variant="secondary" onPress={onPress} />
         </Card>
       </Pressable>
     );

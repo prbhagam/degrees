@@ -12,6 +12,7 @@ import {
   extractCitedPlaces,
   isPreviousTitle,
   isPreviousVenue,
+  isRateLimitError,
   previousPlansBlock,
   MAX_REJECTIONS,
   newActivityJob,
@@ -281,6 +282,17 @@ await test('parseIsoOrNull parses valid dates to ISO string and returns null for
   assert.equal(parseIsoOrNull(''), null);
   assert.equal(parseIsoOrNull(null), null);
   assert.equal(parseIsoOrNull(undefined), null);
+});
+
+await test('isRateLimitError detects 429 and RESOURCE_EXHAUSTED errors', async () => {
+  assert.equal(isRateLimitError({ status: 429 }), true);
+  assert.equal(isRateLimitError({ status: 'RESOURCE_EXHAUSTED' }), true);
+  assert.equal(isRateLimitError({ code: 429 }), true);
+  assert.equal(isRateLimitError({ error: { code: 429, status: 'RESOURCE_EXHAUSTED' } }), true);
+  assert.equal(isRateLimitError(new Error('You exceeded your current quota, please check your plan')), true);
+  assert.equal(isRateLimitError(new Error('Rate limit exceeded')), true);
+  assert.equal(isRateLimitError(new Error('Something completely unrelated')), false);
+  assert.equal(isRateLimitError(null), false);
 });
 
 console.warn = silence;
