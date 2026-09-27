@@ -233,6 +233,36 @@ export function DegreeBadge({ label, tone = 'met' }: { label: string; tone?: 'yo
   );
 }
 
+// Added Sep 27 (wave 6 follow-up): the header's edge inset and icon buttons, so a header icon lands in the same place on
+// every iPhone. The tab bar layout pads each header side by HEADER_EDGE (plus the safe-area inset); an icon button is a
+// HEADER_ICON_BOX square with its glyph centred, so the layout subtracts the box's slack to put the glyph itself on the
+// inset. 20pt is UIKit's layout margin on the larger phones, used everywhere so small phones get the same room.
+export const HEADER_EDGE = 20;
+export const HEADER_ICON_BOX = 44; // Apple's minimum tap target
+export const HEADER_ICON_SIZE = 22;
+export const HEADER_ICON_SLACK = (HEADER_ICON_BOX - HEADER_ICON_SIZE) / 2;
+
+export function HeaderIconButton({
+  label,
+  onPress,
+  children,
+}: {
+  label: string;
+  onPress: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      onPress={onPress}
+      style={{ width: HEADER_ICON_BOX, height: HEADER_ICON_BOX, alignItems: 'center', justifyContent: 'center' }}
+    >
+      {children}
+    </Pressable>
+  );
+}
+
 // CHANGED Sep 26 (wave 4): the loading indicator is the Degrees mark with its node orbiting.
 export function LoadingState({ label }: { label: string }) {
   return (

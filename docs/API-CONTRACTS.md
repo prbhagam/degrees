@@ -12,7 +12,7 @@ This file is what makes four people concurrent. It is implemented as TypeScript 
 
 **CHANGED Sep 26 (wave 5, branch `sahith/wave5-feedback`)** — additive: notifications are finally WRITTEN (`event_changed` joins the type list; `POST /api/notifications/read`; `GET`/`PUT /api/notifications/settings` + `MeResponse.notificationSettings`); the calendar moved from "Host a meetup" to the plan (`GroupResponse.times`, `POST /api/groups/:id/times`, `/times/:timeId/vote`, `/times/:timeId/choose`, `DELETE /times/:timeId`); `HangoutSummary.lastMessage` + `chatOpen` for the Chats tab; `POST /groups/:id/activity/restore` moves the row instead of copying it (no duplicate history); the planner enforces budget and distance. Needs migration `0012`.
 
-**CHANGED Sep 27 (wave 6, branch `sahith/wave6`)** — additive, no migration: `POST /api/events` takes nothing (`name`, `groupSizeMin`, `groupSizeMax` all optional; an unnamed meetup has `name: null` and the app titles it by who's joined); `HangoutSummary` gains `memberNames` + `unrevealedCount` (the other members the viewer may see, same redaction rule as `GroupResponse`) and `feedbackGiven`; new `GET /api/graph/reach` (real headcounts for the degree dial, counts only), `POST /api/profile/tags` (paragraph → suggested interests + avoids, real Gemini call), `PUT /api/profile/photo` (the avatar alone, for signup); `MATCHED_GROUP_MAX` (8) is exported from `@degrees/shared`. `GroupMember.degree` is never 0 for anyone but the viewer (the host used to come back as a second "You").
+**CHANGED Sep 27 (wave 6, branch `sahith/wave6`)** — additive, no migration: `POST /api/events` takes nothing (`name`, `groupSizeMin`, `groupSizeMax` all optional; an unnamed meetup has `name: null` and the app titles it by who's joined); `HangoutSummary` gains `memberNames` + `unrevealedCount` (the other members the viewer may see, same redaction rule as `GroupResponse`) and `feedbackGiven`; new `GET /api/graph/reach` (real headcounts for the degree dial, counts only), `POST /api/profile/tags` (paragraph → suggested interests + avoids, real Gemini call), `PUT /api/profile/photo` (the avatar alone, for signup); `MATCHED_GROUP_MAX` (8) is exported from `@degrees/shared`. `GroupMember.degree` is never 0 for anyone but the viewer (the host used to come back as a second "You"). Follow-up: `GenerateActivityInput.previousPlans` (internal).
 
 **Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
 **Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
@@ -385,6 +385,7 @@ generateActivity(input: {
   members: { displayName, interests, avoids }[];       // avoids: Added wave 3 — the member's 'avoid' tags
   constraints: { maxCostCents, maxTravelMi, city, lat, lng };
   previousVenues: string[];                            // Added wave 3 — never suggested again for this group
+  previousPlans: { title, venue }[];                   // Added wave 6 follow-up — every earlier plan, current first; the new one MUST differ from all
 }): Promise<Activity>
   // Gemini Flash + Maps grounding. Ticketmaster is a secondary source.
   // wave 3: every member's avoids become HARD RULES in the prompt (e.g. "Alcohol" → no bars/pubs/breweries…), a

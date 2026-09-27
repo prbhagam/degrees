@@ -240,6 +240,31 @@ export function violatesAvoids(venueOrTitle: string, input: GenerateActivityInpu
   return null;
 }
 
+// CHANGED Sep 27 (wave 6 follow-up, Sahith): a regenerate shows the model every plan the group already has — the whole
+// plan, current one first — and makes "different" a hard requirement. It used to get only the venue names with "prefer a
+// different kind of activity", and happily came back with the bowling alley across town. Venues outside the last 20
+// plans still count through previousVenues (isPreviousVenue).
+export function previousPlansBlock(input: GenerateActivityInput): string {
+  const plans = input.previousPlans ?? [];
+  const venuesOnly = input.previousVenues.filter(
+    (venue) => !plans.some((plan) => normalizeName(plan.venue) === normalizeName(venue)),
+  );
+  if (plans.length === 0 && venuesOnly.length === 0) return '';
+  const lines = [
+    ...plans.map((plan, index) => {
+      const what = plan.title && plan.venue ? `"${plan.title}" at ${plan.venue}` : plan.title ? `"${plan.title}"` : plan.venue;
+      return `${index + 1}. ${what}${index === 0 ? ' (the current plan)' : ''}`;
+    }),
+    ...venuesOnly.map((venue, index) => `${plans.length + index + 1}. ${venue}`),
+  ];
+  return `\n\nPLANS THIS GROUP HAS ALREADY BEEN GIVEN — they asked for something NEW:
+${lines.join('\n')}
+The new plan MUST be different from EVERY plan above. That means:
+- a different venue (never one of these, or another location of the same place or chain), AND
+- a different kind of activity (if they've had bowling, not another bowling alley, arcade, or games bar; if they've had a café, not another café).
+A plan that repeats or closely resembles any of these is wrong, even if it fits the group well.`;
+}
+
 function describeGroup(input: GenerateActivityInput, rejections: ActivityJob['rejected'] = []): string {
   const members = input.members
     .map(
@@ -253,10 +278,7 @@ function describeGroup(input: GenerateActivityInput, rejections: ActivityJob['re
     rules.length > 0
       ? `\n\nHARD RULES (someone in the group opted out of these — a plan that breaks one is wrong, even if it fits everyone else):\n${rules.map((rule) => `- ${rule}`).join('\n')}`
       : '';
-  const previous =
-    input.previousVenues.length > 0
-      ? `\n\nAlready suggested to this group — do NOT pick any of these again, and prefer a different kind of activity from them: ${input.previousVenues.join('; ')}.`
-      : '';
+  const previous = previousPlansBlock(input);
   const rejected =
     rejections.length > 0
       ? `\n\nRejected — do not pick these or anything like them: ${rejections.map(({ venue, reason }) => `${venue} (${reason})`).join('; ')}.`
@@ -285,6 +307,12 @@ export function isPreviousVenue(venue: string, input: GenerateActivityInput): bo
   });
 }
 
+// Wave 6 follow-up: the same plan at a new address ("Duckpin bowling + food hall" again) is still a repeat.
+export function isPreviousTitle(title: string, input: GenerateActivityInput): boolean {
+  const wanted = normalizeName(title);
+  return wanted.length > 0 && (input.previousPlans ?? []).some((plan) => normalizeName(plan.title) === wanted);
+}
+
 // Models sometimes wrap JSON in prose or code fences; take the outermost object.
 function extractJson(text: string): unknown {
   const start = text.indexOf('{');
@@ -310,7 +338,7 @@ async function groundedPlanWith(
 
 ${describeGroup(input, rejections)}
 
-Use Google Maps to choose ONE real, currently open venue for a low-pressure activity that most of the group would enjoy together — something to do, not just somewhere to sit. The distance and cost limits above are the group's own settings: verify both before answering, and if your first idea breaks one, pick another.
+Use Google Maps to choose ONE real, currently open venue for a low-pressure activity that most of the group would enjoy together — something to do, not just somewhere to sit. The distance and cost limits above are the group's own settings: verify both before answering, and if your first idea breaks one, pick another. If plans are listed as already given, yours MUST be a new idea — different from all of them in venue and in kind of activity.
 
 Reply with only a JSON object, no prose:
 {"venue": "<exact Google Maps name of the venue>", "title": "<short plan title, e.g. 'Bouldering + tacos after'>", "estimatedPricePerPersonUsd": <number or null>, "reasoning": "<one or two friendly sentences naming which members' interests this fits>", "address": "<street address>", "lat": <number>, "lng": <number>}`,
@@ -329,6 +357,9 @@ Reply with only a JSON object, no prose:
   }
   if (isPreviousVenue(plan.venue, input)) {
     throw new ConstraintError(plan.venue, 'already suggested to this group');
+  }
+  if (isPreviousTitle(plan.title, input)) {
+    throw new ConstraintError(plan.venue, `"${plan.title}" repeats a plan this group already has`);
   }
   // The model's own estimate is checked here too, so an over-budget pick never costs a Places call.
   if (typeof plan.estimatedPricePerPersonUsd === 'number' && Math.round(plan.estimatedPricePerPersonUsd * 100) > input.constraints.maxCostCents) {

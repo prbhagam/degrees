@@ -19,7 +19,7 @@ import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { summaryTitle } from '@/features/groups/degrees';
 import { useHangouts, useMe } from '@/features/groups/queries';
 import { useUnreadCount } from '@/features/notifications/queries';
-import { Button, Card, Heading, Muted, Screen } from '@/components/ui';
+import { Button, Card, HEADER_ICON_SIZE, HeaderIconButton, Heading, Muted, Screen } from '@/components/ui';
 
 const STATUS_LABEL: Record<HangoutSummary['status'], string> = {
   proposed: 'Waiting on others',
@@ -177,26 +177,17 @@ export function HomeScreen() {
       <Stack.Screen
         options={{
           // Wave 4: the mark sits with the title; "+" is gone (Host a meetup is right below).
-          headerLeft: () => (
-            <View className="pl-4">
-              <DegreesMark size={24} />
-            </View>
-          ),
+          // Wave 6 follow-up: no padding here — the tab layout insets both header sides the same on every phone.
+          headerLeft: () => <DegreesMark size={24} />,
           headerRight: () => (
-            // Wave 6: pr-2 + a 36pt target keeps the bell off the screen edge (it sat flush against it).
-            <View className="flex-row items-center gap-4 pr-2">
-              <Pressable
-                accessibilityLabel="Notifications"
-                hitSlop={8}
-                className="h-9 w-9 items-center justify-center"
-                onPress={() => router.push('/notifications')}
-              >
-                <Bell size={20} color={ink} />
+            <HeaderIconButton label="Notifications" onPress={() => router.push('/notifications')}>
+              <View>
+                <Bell size={HEADER_ICON_SIZE} color={ink} />
                 {unread > 0 ? (
-                  <View className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full border border-paper bg-ember" />
+                  <View className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border border-paper bg-ember" />
                 ) : null}
-              </Pressable>
-            </View>
+              </View>
+            </HeaderIconButton>
           ),
         }}
       />

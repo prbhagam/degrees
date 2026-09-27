@@ -3,9 +3,14 @@
 // between them at all, only the __DEV__ links list in HomeScreen stood in for it.
 // CHANGED Sep 26 (wave 5, Sahith): a Chats tab (every open group chat in one place), and the bar's items are
 // centred — they used to hug the top edge with the whole home-indicator inset left blank underneath.
+// CHANGED Sep 27 (wave 6 follow-up, Sahith): the header's sides are padded here, explicitly. This is React Navigation's
+// JS header, which adds no side margin of its own on a phone in portrait, so each screen's headerRight used to carry its
+// own ad-hoc padding and the bell sat in a different spot from screen to screen and phone to phone. Now a header icon's
+// glyph is always HEADER_EDGE (20pt) plus the safe-area inset from the edge, the same as the mark on the left.
 import { Tabs } from 'expo-router';
 import { House, MessageCircle, Network, User } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { HEADER_EDGE, HEADER_ICON_SLACK } from '@/components/ui';
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
@@ -27,6 +32,8 @@ export default function TabsLayout() {
         headerShadowVisible: false,
         headerTitleStyle: { fontFamily: 'Fraunces_700Bold', color: '#20201C', fontSize: 20 },
         headerTintColor: '#20201C',
+        headerLeftContainerStyle: { paddingLeft: HEADER_EDGE + insets.left },
+        headerRightContainerStyle: { paddingRight: HEADER_EDGE - HEADER_ICON_SLACK + insets.right },
       }}
     >
       <Tabs.Screen

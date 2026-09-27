@@ -8,7 +8,9 @@ import {
   activityJobSchema,
   avoidRules,
   constraintViolation,
+  isPreviousTitle,
   isPreviousVenue,
+  previousPlansBlock,
   MAX_REJECTIONS,
   newActivityJob,
   runActivityStage,
@@ -20,6 +22,7 @@ const input: GenerateActivityInput = {
   members: [{ displayName: 'Avery', interests: ['bouldering'], avoids: [] }],
   constraints: { maxCostCents: 3000, maxTravelMi: 10, city: 'Atlanta', lat: 33.7756, lng: -84.3963 },
   previousVenues: [],
+  previousPlans: [],
 };
 
 let failures = 0;
@@ -115,6 +118,34 @@ await test('isPreviousVenue matches loosely against the venues already suggested
   assert.ok(isPreviousVenue('the painted duck', seen));
   assert.equal(isPreviousVenue('Stone Summit Midtown', seen), false);
   assert.equal(isPreviousVenue('', seen), false);
+});
+
+// Wave 6 follow-up: regenerating shows every earlier plan and requires a different one.
+await test('previousPlansBlock lists every earlier plan, current first, and makes "different" mandatory', async () => {
+  assert.equal(previousPlansBlock(input), '');
+  const seen: GenerateActivityInput = {
+    ...input,
+    previousVenues: ['Stone Summit', 'The Painted Duck', 'Ponce City Market'],
+    previousPlans: [
+      { title: 'Duckpin bowling + food hall', venue: 'The Painted Duck' },
+      { title: 'Bouldering + tacos after', venue: 'Stone Summit' },
+    ],
+  };
+  const block = previousPlansBlock(seen);
+  assert.match(block, /1\. "Duckpin bowling \+ food hall" at The Painted Duck \(the current plan\)/);
+  assert.match(block, /2\. "Bouldering \+ tacos after" at Stone Summit/);
+  // A venue from further back (only in previousVenues) is still listed, once.
+  assert.match(block, /3\. Ponce City Market/);
+  assert.equal(block.match(/Stone Summit/g)?.length, 1);
+  assert.match(block, /MUST be different from EVERY plan above/);
+  assert.match(block, /a different kind of activity/);
+});
+
+await test('isPreviousTitle catches the same plan under a new venue', async () => {
+  const seen: GenerateActivityInput = { ...input, previousPlans: [{ title: 'Duckpin bowling + food hall', venue: 'The Painted Duck' }] };
+  assert.ok(isPreviousTitle('Duckpin Bowling + Food Hall', seen));
+  assert.equal(isPreviousTitle('Board games at Joystick', seen), false);
+  assert.equal(isPreviousTitle('', seen), false);
 });
 
 // Wave 5: budget and distance are enforced on the assembled plan, and a rejection retries the grounded stage
