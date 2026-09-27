@@ -1,11 +1,14 @@
 // Owner: shared mobile scaffold (Charles). The animated splash: paper background, starting completely blank —
-// no logo, nothing drawn (app.json's native splash is blank too, so there's no pop at handoff). A cursor blinks,
-// then the "d" strikes in at full size in a single instant (opacity 0->1 with no animation, no scale, no bounce
-// — a real keystroke doesn't ease in), the cursor jumps to the ring's spot and blinks there, then the ring
-// strikes in the same way — the mark itself is what's "typed" (there's only ever one logo on screen, never
-// separate caption text). Once both are struck, that's exactly DegreesMark's resting pose, so the swap to
-// <DegreesMark animated loop={false}> is pixel-for-pixel: it runs its shrink/grow/orbit cycle once, then the
-// whole thing lifts to reveal the app underneath. Runs once per cold start; never blocks.
+// no logo, nothing drawn (app.json's native splash is blank too, so there's no pop at handoff). The cursor
+// previews each glyph before it's typed and only moves past it once it's actually struck — mimicking a real
+// typing cursor, not a caret that teleports to a character that doesn't exist yet: it blinks at the d's start,
+// the "d" strikes in at full size in a single instant (opacity 0->1, no animation, no scale, no bounce — a real
+// keystroke doesn't ease in), the cursor advances to just after the d, blinks there, then jumps ahead to the
+// ring's start and blinks there — previewing where the ring will land before it exists — then the ring strikes
+// in the same way and the cursor advances to just after it. The mark itself is what's "typed" (there's only ever
+// one logo on screen, never separate caption text). Once both are struck, that's exactly DegreesMark's resting
+// pose, so the swap to <DegreesMark animated loop={false}> is pixel-for-pixel: it runs its shrink/grow/orbit
+// cycle once, then the whole thing lifts to reveal the app underneath. Runs once per cold start; never blocks.
 import { useCallback, useEffect, useState } from 'react';
 import { Image, StyleSheet } from 'react-native';
 import Animated, {
@@ -18,7 +21,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import { DegreesMark, D_POSE, RING_TOPRIGHT, INK, EMBER } from './DegreesMark';
+import { DegreesMark, D_POSE, RING_TOPRIGHT, INK, EMBER, ORBIT_MS } from './DegreesMark';
 
 const dGlyph = require('../../assets/brand/d-glyph.png');
 const ringGlyph = require('../../assets/brand/degree-ring.png');
@@ -26,12 +29,14 @@ const ringGlyph = require('../../assets/brand/degree-ring.png');
 // Must match app.json → expo-splash-screen imageWidth so the handoff is pixel-for-pixel. (Currently none — the
 // native splash is left blank on purpose, see app.json.)
 const MARK_SIZE = 132;
-const ORBIT_MS = 1000;
-const CURSOR_LEAD_MS = 350; // cursor blinks alone first, like it's about to type
-const GAP_MS = 350; // cursor sits at the ring's spot before it strikes
-const TYPE_HOLD_MS = 450; // lets the cursor blink a couple more times before the mark takes over
+const PREVIEW_D_MS = 350; // cursor blinks alone at the d's start before it strikes
+const AFTER_D_MS = 150; // cursor holds just after the newly-struck d
+const PREVIEW_RING_MS = 250; // cursor previews the ring's start before it strikes
+const TYPE_HOLD_MS = 450; // cursor holds just after the ring, before the mark takes over
 
 type Phase = 'typing' | 'graphic';
+// 0: previewing the d's start · 1: just after the d · 2: previewing the ring's start · 3: just after the ring
+type CursorPos = 0 | 1 | 2 | 3;
 
 export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   const [phase, setPhase] = useState<Phase>('typing');
@@ -42,7 +47,7 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
 
   const dOpacity = useSharedValue(0);
   const ringOpacity = useSharedValue(0);
-  const cursorAtRing = useSharedValue(0); // 0: waiting at the d's spot, 1: waiting at the ring's spot
+  const cursorPos = useSharedValue<CursorPos>(0);
   const cursorBlink = useSharedValue(1);
   const typingOpacity = useSharedValue(1);
   const lift = useSharedValue(0);
@@ -53,15 +58,20 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
       -1,
     );
     // Struck all at once, like a keystroke: opacity jumps 0->1 with no animation at all.
-    dOpacity.value = withDelay(CURSOR_LEAD_MS, withTiming(1, { duration: 0 }));
-    cursorAtRing.value = withDelay(CURSOR_LEAD_MS, withTiming(1, { duration: 0 }));
-
-    ringOpacity.value = withDelay(CURSOR_LEAD_MS + GAP_MS, withTiming(1, { duration: 0 }));
+    dOpacity.value = withDelay(PREVIEW_D_MS, withTiming(1, { duration: 0 }));
+    ringOpacity.value = withDelay(PREVIEW_D_MS + AFTER_D_MS + PREVIEW_RING_MS, withTiming(1, { duration: 0 }));
+    // Advance one step at a time, each relative to the step before it — same chained-delay pattern as the blink.
+    cursorPos.value = withSequence(
+      withTiming(0, { duration: 0 }),
+      withDelay(PREVIEW_D_MS, withTiming(1, { duration: 0 })),
+      withDelay(AFTER_D_MS, withTiming(2, { duration: 0 })),
+      withDelay(PREVIEW_RING_MS, withTiming(3, { duration: 0 })),
+    );
 
     const t = setTimeout(() => {
       typingOpacity.value = withTiming(0, { duration: 150 });
       setPhase('graphic');
-    }, CURSOR_LEAD_MS + GAP_MS + TYPE_HOLD_MS);
+    }, PREVIEW_D_MS + AFTER_D_MS + PREVIEW_RING_MS + TYPE_HOLD_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -85,11 +95,13 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   const dStyle = useAnimatedStyle(() => ({ opacity: dOpacity.value }));
   const ringStyle = useAnimatedStyle(() => ({ opacity: ringOpacity.value }));
   const cursorStyle = useAnimatedStyle(() => {
-    const box = cursorAtRing.value > 0.5 ? RING_TOPRIGHT : D_POSE;
-    // After the glyph, not before it: a typing cursor trails the character it just placed.
+    const pos = cursorPos.value;
+    // Positions 0-1 are the d's slot, 2-3 are the ring's; odd positions are "just after", even are "previewing".
+    const box = pos < 2 ? D_POSE : RING_TOPRIGHT;
+    const afterGlyph = pos === 1 || pos === 3;
     return {
       opacity: cursorBlink.value,
-      left: px(box.left + box.width),
+      left: px(afterGlyph ? box.left + box.width : box.left),
       top: px(box.top),
       height: px(box.height),
     };

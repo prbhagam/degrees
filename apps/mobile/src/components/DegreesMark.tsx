@@ -6,27 +6,29 @@
 // Static (`animated={false}`, headers/icon), it's the resting "d°" lockup: the ember ring top-right of the
 // ascender, exactly as designed.
 //
-// Animated (loading indicator, and the tail of the splash), it runs a repeating three-beat cycle: the ink "d"
-// shrinks toward a spot parked opposite the ring's resting spot (far enough past the letter that the orbit
-// never crosses it) while an ember ring already sits there, growing in — and at the same time an ember ring the
-// shape of the old one grows toward the d's footprint while an ink d already sits there, growing in. Both pairs
-// move AND cross-dissolve continuously across the same window (not staged move-then-fade), so the two shapes
-// overlap and blend the whole time they're in motion — that overlap, one shape thinning as the other solidifies
-// over the same patch of screen, is what reads as morphing in shape and color, not two separate cuts. Then the
-// parked ring sweeps counterclockwise exactly halfway round the letter, landing back at the ring's original
-// top-right spot — then it repeats. `loop={false}` runs the cycle once and calls `onDone`, settled at the same
-// resting pose it started from.
+// Animated (loading indicator, and the tail of the splash), it runs a repeating three-beat cycle built from two
+// "slots", each a single box that physically travels start-to-end across the whole morph window — not two shapes
+// independently fading in place. Slot A carries the d's box from D_POSE to the park spot (opposite the ring's
+// resting spot); slot B carries the ring's box from RING_TOPRIGHT to D_POSE. Each slot's box interpolates left,
+// top, width AND height continuously, so the box itself is what's moving and resizing — the physical transform
+// the user asked for. Inside each travelling box, the d image and the ring image are cross-dissolved (one
+// fading 1->0, the other 0->1) so the box's *content* reads as morphing shape and color while the box itself is
+// mid-flight, rather than a shape sliding away while an unrelated finished shape simply appears elsewhere. Once
+// slot A reaches the park spot (now ring-shaped, ember), it sweeps counterclockwise exactly halfway round the
+// letter to the ring's original top-right spot. Slot B settles at D_POSE (now d-shaped, ink) and stays. Then it
+// repeats. `loop={false}` runs the cycle once and calls `onDone`, settled at the same resting pose it started from.
 //
 // Colour is always a static prop, never animated through useAnimatedStyle: Reanimated's fast path doesn't
-// reliably drive Image#tintColor per frame. Each shape keeps one fixed tint for its whole life (d always ink,
-// ring always ember) — the color "change" is entirely the crossfade between an ink shape and an ember shape.
+// reliably drive Image#tintColor per frame. Each image keeps one fixed tint for its whole life (d always ink,
+// ring always ember) — the color "change" is entirely the crossfade between an ink image and an ember image
+// sharing the same moving box.
 //
 // Every useAnimatedStyle below is fully self-contained (no shared helper function that itself calls a hook, no
-// worklet calling another worklet for the *whole* computation) — some math is repeated between the two
-// transitional styles as a result. That's deliberate: keep this file boringly literal so there's nothing subtle
-// for the animation to fail to pick up.
+// worklet calling another worklet for the *whole* computation) — the eased-progress formula is repeated across
+// styles as a result. That's deliberate: keep this file boringly literal so there's nothing subtle for the
+// animation to fail to pick up.
 import { useEffect } from 'react';
-import { Image, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -67,21 +69,20 @@ function polarBoxPlain(cx: number, cy: number, radius: number, angleDeg: number,
   return { left: cx + radius * Math.cos(rad) - itemSize / 2, top: cy + radius * Math.sin(rad) - itemSize / 2, width: itemSize, height: itemSize };
 }
 
+// Slot A's destination once parked (before it sweeps home).
 const PARK = polarBoxPlain(D_CENTER.x, D_CENTER.y, ORBIT_R, PARK_ANGLE, RING_SIZE);
-// Transitional (fading-out) shapes: the shrinking d collapses toward the park spot, matching the size the stable
-// ring will fade in at there; the growing ring swells past the d's own footprint before it's fully faded, so the
-// crossfade never shows a gap.
-const D_SHRUNK = { left: PARK.left, top: PARK.top, width: RING_SIZE, height: RING_SIZE };
-const RING_GROWN = { left: D_CENTER.x - D_POSE.height / 2, top: D_CENTER.y - D_POSE.height / 2, width: D_POSE.height, height: D_POSE.height };
 
 const MORPH_MS = 900;
 const SETTLE_MS = 400;
+// The loading spinner (ui.tsx LoadingState) and the splash's tail must sweep at the same speed — both default to
+// this and neither should override it with a different number.
+export const ORBIT_MS = 1000;
 
 export function DegreesMark({
   size = 48,
   animated = false,
   // Duration of the (half-)orbit sweep. The settle hold and the morph itself are fixed.
-  orbitMs = 2400,
+  orbitMs = ORBIT_MS,
   // false runs the shrink/grow/orbit cycle exactly once and calls onDone when it settles.
   loop = true,
   onDone,
@@ -112,76 +113,61 @@ export function DegreesMark({
     }
   }, [animated, loop, master, onDone, totalMs]);
 
-  // The old ink d: moves and cross-dissolves continuously from D_POSE to the park spot across the whole morph.
-  const dShrinkingStyle = useAnimatedStyle(() => {
+  // Slot A's box: D_POSE -> PARK during the morph (position AND size interpolate together, so the box itself
+  // shrinks from the d's rectangle to the ring's square as it travels), then orbits from PARK back to the ring's
+  // resting spot.
+  const slotABoxStyle = useAnimatedStyle(() => {
     'worklet';
     const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
-    const left = D_POSE.left + t * (D_SHRUNK.left - D_POSE.left);
-    const top = D_POSE.top + t * (D_SHRUNK.top - D_POSE.top);
-    const width = D_POSE.width + t * (D_SHRUNK.width - D_POSE.width);
-    const height = D_POSE.height + t * (D_SHRUNK.height - D_POSE.height);
-    return {
-      position: 'absolute',
-      left: left * size,
-      top: top * size,
-      width: width * size,
-      height: height * size,
-      opacity: 1 - t,
-    };
+    const width = D_POSE.width + t * (RING_SIZE - D_POSE.width);
+    const height = D_POSE.height + t * (RING_SIZE - D_POSE.height);
+    let left: number;
+    let top: number;
+    if (master.value < mMorph) {
+      left = D_POSE.left + t * (PARK.left - D_POSE.left);
+      top = D_POSE.top + t * (PARK.top - D_POSE.top);
+    } else {
+      const orbitT = Easing.inOut(Easing.cubic)(interpolate(master.value, [mMorph, mOrbit], [0, 1], Extrapolation.CLAMP));
+      const angle = ((PARK_ANGLE - 180 * orbitT) * Math.PI) / 180;
+      left = D_CENTER.x + ORBIT_R * Math.cos(angle) - width / 2;
+      top = D_CENTER.y + ORBIT_R * Math.sin(angle) - height / 2;
+    }
+    return { position: 'absolute', left: left * size, top: top * size, width: width * size, height: height * size };
   });
 
-  // The old ember ring: moves and cross-dissolves continuously from RING_TOPRIGHT toward the d's footprint.
-  const ringGrowingStyle = useAnimatedStyle(() => {
+  // Slot A's content: the d image fades out, the ring image fades in, both inside the same travelling box.
+  const slotADStyle = useAnimatedStyle(() => {
     'worklet';
     const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
-    const left = RING_TOPRIGHT.left + t * (RING_GROWN.left - RING_TOPRIGHT.left);
-    const top = RING_TOPRIGHT.top + t * (RING_GROWN.top - RING_TOPRIGHT.top);
-    const width = RING_TOPRIGHT.width + t * (RING_GROWN.width - RING_TOPRIGHT.width);
-    const height = RING_TOPRIGHT.height + t * (RING_GROWN.height - RING_TOPRIGHT.height);
-    return {
-      position: 'absolute',
-      left: left * size,
-      top: top * size,
-      width: width * size,
-      height: height * size,
-      opacity: 1 - t,
-    };
+    return { opacity: 1 - t };
+  });
+  const slotARingStyle = useAnimatedStyle(() => {
+    'worklet';
+    const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
+    return { opacity: t };
   });
 
-  // The new ink d: fixed at D_POSE, fading in across the same window the old d is fading out over — the
-  // overlap (old d thinning, new d solidifying at the spot the old one is shrinking away from) is the "morph".
-  const dFadeInStyle = useAnimatedStyle(() => {
+  // Slot B's box: RING_TOPRIGHT -> D_POSE across the morph, then holds — this is what becomes the resting d.
+  const slotBBoxStyle = useAnimatedStyle(() => {
     'worklet';
     const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
-    return {
-      position: 'absolute',
-      left: D_POSE.left * size,
-      top: D_POSE.top * size,
-      width: D_POSE.width * size,
-      height: D_POSE.height * size,
-      opacity: t,
-    };
+    const left = RING_TOPRIGHT.left + t * (D_POSE.left - RING_TOPRIGHT.left);
+    const top = RING_TOPRIGHT.top + t * (D_POSE.top - RING_TOPRIGHT.top);
+    const width = RING_TOPRIGHT.width + t * (D_POSE.width - RING_TOPRIGHT.width);
+    const height = RING_TOPRIGHT.height + t * (D_POSE.height - RING_TOPRIGHT.height);
+    return { position: 'absolute', left: left * size, top: top * size, width: width * size, height: height * size };
   });
 
-  // The new ember ring: fades in at the park spot across the same window, then sweeps counterclockwise halfway
-  // round the letter to its resting spot.
-  const ringOrbitStyle = useAnimatedStyle(() => {
+  // Slot B's content: the ring image fades out, the d image fades in, both inside the same travelling box.
+  const slotBRingStyle = useAnimatedStyle(() => {
     'worklet';
     const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
-    const orbitT = Easing.inOut(Easing.cubic)(interpolate(master.value, [mMorph, mOrbit], [0, 1], Extrapolation.CLAMP));
-    const angle = ((PARK_ANGLE - 180 * orbitT) * Math.PI) / 180;
-    const cx = D_CENTER.x * size;
-    const cy = D_CENTER.y * size;
-    const r = ORBIT_R * size;
-    const ringSize = RING_SIZE * size;
-    return {
-      position: 'absolute',
-      left: cx + r * Math.cos(angle) - ringSize / 2,
-      top: cy + r * Math.sin(angle) - ringSize / 2,
-      width: ringSize,
-      height: ringSize,
-      opacity: t,
-    };
+    return { opacity: 1 - t };
+  });
+  const slotBDStyle = useAnimatedStyle(() => {
+    'worklet';
+    const t = Easing.inOut(Easing.cubic)(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
+    return { opacity: t };
   });
 
   if (!animated) {
@@ -195,22 +181,25 @@ export function DegreesMark({
 
   return (
     <View style={{ width: size, height: size }}>
-      {/* Transitional: the old ink d shrinking away toward the park spot. Animated.View carries the box/opacity
-          (the pattern proven to actually move on screen); the Image inside is a plain, static child. */}
-      <Animated.View style={dShrinkingStyle}>
-        <Image source={dGlyph} resizeMode="contain" style={{ width: '100%', height: '100%' }} />
+      {/* Slot A: the d's box physically travelling to the park spot (then orbiting home), its content dissolving
+          from the d image to the ring image as it moves. */}
+      <Animated.View style={slotABoxStyle}>
+        <Animated.View style={[StyleSheet.absoluteFill, slotADStyle]}>
+          <Image source={dGlyph} resizeMode="contain" style={{ width: '100%', height: '100%' }} />
+        </Animated.View>
+        <Animated.View style={[StyleSheet.absoluteFill, slotARingStyle]}>
+          <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ width: '100%', height: '100%' }} />
+        </Animated.View>
       </Animated.View>
-      {/* Transitional: the old ember ring swelling toward the d's footprint. */}
-      <Animated.View style={ringGrowingStyle}>
-        <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ width: '100%', height: '100%' }} />
-      </Animated.View>
-      {/* Stable: the new d, ink, fixed at D_POSE, fading in. */}
-      <Animated.View style={dFadeInStyle}>
-        <Image source={dGlyph} resizeMode="contain" style={{ width: '100%', height: '100%' }} />
-      </Animated.View>
-      {/* Stable: the new ring, ember, parked then sweeping halfway home. */}
-      <Animated.View style={ringOrbitStyle}>
-        <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ width: '100%', height: '100%' }} />
+      {/* Slot B: the ring's box physically travelling to D_POSE and settling there, its content dissolving from
+          the ring image to the d image as it moves. */}
+      <Animated.View style={slotBBoxStyle}>
+        <Animated.View style={[StyleSheet.absoluteFill, slotBRingStyle]}>
+          <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ width: '100%', height: '100%' }} />
+        </Animated.View>
+        <Animated.View style={[StyleSheet.absoluteFill, slotBDStyle]}>
+          <Image source={dGlyph} resizeMode="contain" style={{ width: '100%', height: '100%' }} />
+        </Animated.View>
       </Animated.View>
     </View>
   );
