@@ -21,6 +21,7 @@ src/lib/graph.ts         exploreFrom(): BFS over connections → each person's d
 src/lib/groups.ts        loadGroup() as the viewer sees it, membership checks (404 for non-members), activity I/O (Pranav)
 src/external/            places.ts (Places API New) + ticketmaster.ts (Discovery, cached per area)             (Pranav)
 src/routes/auth.ts       POST /api/auth/signup — the only public route, mounted before requireAuth in app.ts
+src/routes/admin.ts      GET /admin (demo web panel), POST /admin/api/match-all (force periodic batch matching)
 src/routes/*.ts          one Hono sub-app per contract area: me, profile, preferences, connections + graph,
                          events (join + host — wave 2: creates the backing meetup group, expiring codes),
                          hangouts (wave 2: GET /hangouts, groups + meetups for Home), match, groups (view,
@@ -28,7 +29,7 @@ src/routes/*.ts          one Hono sub-app per contract area: me, profile, prefer
                          messages, feedback, notifications (mock only).
                          connections, events, groups, and messages are Pranav's.
 src/ai/                  Gemini wrapper + the AI calls (wave 2 adds generateIcebreakers) + the global rate limiter — see src/ai/AGENTS.md
-src/matching/            Sahith's pipeline — see src/matching/AGENTS.md
+src/matching/            Sahith's pipeline + periodic batch matching (periodicMatch.ts) — see src/matching/AGENTS.md
 src/mocks/fixtures.ts    the coherent mock world every stub returns (Atlanta, HackGT, demo group)
 netlify/functions/       api.ts (Hono router). No background functions: the account is a legacy plan.
 ```

@@ -24,7 +24,7 @@ export function consumePendingHref(): Href {
   setPendingHref(null);
   // '/' is the tabs home route. Wave 3: this was '/index', which isn't a route the router knows (see
   // .expo/types/router.d.ts) — every path that landed here from inside the app hit "Unmatched Route".
-  return pendingHref ?? '/';
+  return (pendingHref ?? '/') as Href;
 }
 
 // Added Sep 26 (wave 2): entering the app proper from login/signup/onboarding. Those screens are pushed on top of

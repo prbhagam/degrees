@@ -10,7 +10,7 @@
 // never names anyone you haven't met (server-side redaction).
 import type { Activity, GroupMember } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
-import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
@@ -301,7 +301,7 @@ export function GroupScreen() {
       if (accept) invalidate();
       else {
         void queryClient.invalidateQueries({ queryKey: queryKeys.hangouts });
-        router.dismissTo('/');
+        router.dismissTo('/' as Href);
       }
     },
   });
@@ -326,7 +326,7 @@ export function GroupScreen() {
       void queryClient.invalidateQueries({ queryKey: queryKeys.graph });
       queryClient.removeQueries({ queryKey: queryKeys.group(id!) });
       // Back to Home (already under this screen), never a fresh '/index' push — that path was "Unmatched Route".
-      router.dismissTo('/');
+      router.dismissTo('/' as Href);
     },
   });
 
