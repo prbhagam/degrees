@@ -205,6 +205,11 @@ export const respondRequestSchema = z.object({
   accept: z.boolean(),
 });
 
+// Added Sep 26 (wave 4): any member can rename a group or meetup (PUT /api/groups/:id).
+export const renameGroupRequestSchema = z.object({
+  name: z.string().trim().min(1, 'Give it a name.').max(60, 'Keep it under 60 characters.'),
+});
+
 // Added Sep 26 (wave 3): bring a previous plan back as the current one (see GroupResponse.activityHistory).
 export const restoreActivityRequestSchema = z.object({
   activityId: z.string().min(1),

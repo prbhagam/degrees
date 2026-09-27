@@ -1,9 +1,9 @@
 // Owner: Pranav (Groups, Activities & Chat) — Added Sep 26. PRD §9 named this a stretch goal
 // ("the strongest answer to 'is this social media?'"); this assigns and builds it.
 // Only ever shows 1st-degree connections (people actually met) — never the wider matching pool.
-// CHANGED Sep 26 (wave 3): this is "1st degree" in the app's own words (you are degree 0), and contact exchange
-// lives here instead of on the feedback screen — the state is saved server-side (POST /graph/exchange) so a
-// number you've swapped is still here next week, whichever group you met in.
+// CHANGED Sep 26 (wave 3): contact exchange lives here (saved server-side, POST /graph/exchange).
+// CHANGED Sep 26 (wave 4): back to "Your circle" (the tab header carries the title, so the page doesn't repeat it);
+// a third view, Play — drag yourself around and bump into people (BumpPlayground.tsx).
 import { Fragment, useState } from 'react';
 import { Stack } from 'expo-router';
 import * as Linking from 'expo-linking';
@@ -15,9 +15,10 @@ import { MessageSquare, Phone } from 'lucide-react-native';
 import { Avatar, Button, ErrorState, LoadingState, Muted, Screen } from '@/components/ui';
 import { queryKeys, useMe } from '@/features/groups/queries';
 import { api } from '@/lib/api';
-import { LIVE_POLL_MS } from '@/lib/query';
+import { LIVE_POLL_MS, usePullToRefresh } from '@/lib/query';
+import { BumpPlayground } from './BumpPlayground';
 
-type Mode = 'list' | 'map';
+type Mode = 'list' | 'map' | 'play';
 type Node = GraphResponse['nodes'][number];
 
 function polarPosition(index: number, total: number, radius: number, center: number) {
@@ -65,7 +66,6 @@ function ContactExchange({ node }: { node: Node }) {
     );
   }
   if (requested && peerAccepted) {
-    // Both agreed but they have no phone on file.
     return (
       <View className="mt-3 border-t border-line pt-3">
         <Muted>{name} agreed, but hasn't added a phone number yet.</Muted>
@@ -109,7 +109,7 @@ function PersonCard({ node, expanded, onPress }: { node: Node; expanded: boolean
         <Avatar name={node.displayName} photoUrl={node.photoUrl} tone="met" />
         <View className="flex-1">
           <Text className="font-body-semibold text-sm text-ink">{node.displayName}</Text>
-          <Muted>1st degree{node.metAt ? ` · met at ${node.metAt}` : ''}</Muted>
+          <Muted>{node.metAt ? `Met at ${node.metAt}` : 'Met in person'}</Muted>
         </View>
         {node.contact.peerPhone ? (
           <Phone size={16} color="#5B7A6B" />
@@ -129,12 +129,19 @@ function PersonCard({ node, expanded, onPress }: { node: Node; expanded: boolean
   );
 }
 
+const MODES: { value: Mode; label: string }[] = [
+  { value: 'list', label: 'List' },
+  { value: 'map', label: 'Map' },
+  { value: 'play', label: 'Play' },
+];
+
 export function CircleScreen() {
   const [mode, setMode] = useState<Mode>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const me = useMe();
   // Wave 2: polls once a minute while focused (new "We met" taps land here) and pulls to refresh.
   const graph = useQuery({ queryKey: queryKeys.graph, queryFn: api.getGraph, refetchInterval: LIVE_POLL_MS });
+  const pull = usePullToRefresh(graph.refetch);
 
   const nodes = graph.data?.nodes ?? [];
   const size = 320;
@@ -144,37 +151,39 @@ export function CircleScreen() {
   const toggle = (id: string) => setSelectedId((current) => (current === id ? null : id));
 
   return (
-    <Screen refreshControl={<RefreshControl refreshing={graph.isRefetching} onRefresh={() => void graph.refetch()} />}>
-      <Stack.Screen options={{ title: '1st degree' }} />
+    <Screen
+      // The playground owns its touches; a scroll view fighting the drag would make bumping feel sticky.
+      scrollEnabled={mode !== 'play'}
+      refreshControl={mode === 'play' ? undefined : <RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />}
+    >
+      <Stack.Screen options={{ title: 'Your circle' }} />
 
       <View className="flex-row items-center justify-between">
-        <Text className="font-display text-2xl text-ink">1st-degree friends</Text>
+        <Muted>
+          {nodes.length} {nodes.length === 1 ? 'person' : 'people'} at 1st degree
+        </Muted>
         <View className="flex-row gap-1.5 rounded-full bg-line p-1">
-          {(['list', 'map'] as const).map((option) => (
+          {MODES.map((option) => (
             <Pressable
-              key={option}
-              onPress={() => setMode(option)}
-              className={`rounded-full px-3.5 py-1.5 ${mode === option ? 'bg-paper-raised' : ''}`}
+              key={option.value}
+              onPress={() => setMode(option.value)}
+              className={`rounded-full px-3.5 py-1.5 ${mode === option.value ? 'bg-paper-raised' : ''}`}
             >
-              <Text className={`font-body-semibold text-xs ${mode === option ? 'text-ink' : 'text-muted'}`}>
-                {option === 'list' ? 'List' : 'Map'}
+              <Text className={`font-body-semibold text-xs ${mode === option.value ? 'text-ink' : 'text-muted'}`}>
+                {option.label}
               </Text>
             </Pressable>
           ))}
         </View>
       </View>
-      <Muted className="mt-1.5">
-        {nodes.length} {nodes.length === 1 ? 'person' : 'people'} one degree from you — everyone you've met in person.
-        It only grows after a hangout, and it's the only place you'll ever see someone's number.
-      </Muted>
 
-      {graph.isPending || me.isPending ? <LoadingState label="Loading your 1st degree…" /> : null}
+      {graph.isPending || me.isPending ? <LoadingState label="Loading your circle…" /> : null}
       {graph.isError ? <ErrorState message={graph.error.message} onRetry={() => void graph.refetch()} /> : null}
 
       {graph.data && mode === 'list' ? (
-        <View className="mt-4 gap-2.5">
+        <View className="mt-2 gap-2.5">
           {nodes.length === 0 ? (
-            <Muted>Nobody yet — you're degree 0. Meet someone in person to start your 1st degree.</Muted>
+            <Muted>Nobody yet — meet someone in person to start your circle.</Muted>
           ) : (
             nodes.map((node) => (
               <PersonCard key={node.id} node={node} expanded={selectedId === node.id} onPress={() => toggle(node.id)} />
@@ -184,7 +193,7 @@ export function CircleScreen() {
       ) : null}
 
       {graph.data && mode === 'map' ? (
-        <View className="mt-4 items-center">
+        <View className="mt-2 items-center">
           <Svg width={size} height={size}>
             {nodes.map((node) => {
               const pos = positions.get(node.id)!;
@@ -236,7 +245,7 @@ export function CircleScreen() {
           <View className="mt-3 gap-1.5">
             <View className="flex-row items-center gap-2">
               <View className="h-0.5 w-4 bg-line" />
-              <Muted>1st degree — connected through you (degree 0)</Muted>
+              <Muted>Connected through you</Muted>
             </View>
             <View className="flex-row items-center gap-2">
               <View className="h-0.5 w-4 bg-sage" />
@@ -249,6 +258,16 @@ export function CircleScreen() {
             </View>
           ) : null}
         </View>
+      ) : null}
+
+      {graph.data && mode === 'play' ? (
+        nodes.length === 0 ? (
+          <Muted className="mt-2">Nobody to bump into yet — meet someone first.</Muted>
+        ) : (
+          <View className="mt-2">
+            <BumpPlayground nodes={nodes} />
+          </View>
+        )
       ) : null}
     </Screen>
   );

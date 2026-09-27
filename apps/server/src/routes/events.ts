@@ -133,7 +133,7 @@ export const eventRoutes = new Hono<AppEnv>()
     // The host is in their own meetup from the start.
     const { error: memberError } = await db
       .from('group_members')
-      .upsert({ group_id: groupId, user_id: userId, degree: 0 }, { onConflict: 'group_id,user_id', ignoreDuplicates: true });
+      .upsert({ group_id: groupId, user_id: userId, degree: 0, accepted_at: new Date().toISOString() }, { onConflict: 'group_id,user_id', ignoreDuplicates: true });
     if (memberError) {
       throw new Error(`group_members insert failed: ${memberError.message}`);
     }
@@ -226,7 +226,7 @@ export const eventRoutes = new Hono<AppEnv>()
       }
       const { error: memberError } = await db
         .from('group_members')
-        .upsert({ group_id: groupId, user_id: userId, degree: null }, { onConflict: 'group_id,user_id', ignoreDuplicates: true });
+        .upsert({ group_id: groupId, user_id: userId, degree: null, accepted_at: new Date().toISOString() }, { onConflict: 'group_id,user_id', ignoreDuplicates: true });
       if (memberError) {
         throw new Error(`group_members insert failed: ${memberError.message}`);
       }

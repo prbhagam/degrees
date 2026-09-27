@@ -13,6 +13,7 @@ import type {
   respondRequestSchema,
   addPhotoRequestSchema,
   contactExchangeRequestSchema,
+  renameGroupRequestSchema,
   restoreActivityRequestSchema,
   sendMessageRequestSchema,
   signupRequestSchema,
@@ -79,6 +80,9 @@ export type ExchangeRequest = z.infer<typeof exchangeRequestSchema>;
 export type RespondRequest = z.infer<typeof respondRequestSchema>;
 export type AddPhotoRequest = z.infer<typeof addPhotoRequestSchema>;
 export type RestoreActivityRequest = z.infer<typeof restoreActivityRequestSchema>;
+export type RenameGroupRequest = z.infer<typeof renameGroupRequestSchema>;
+// Added Sep 26 (wave 4): the viewer's own answer to a proposed group.
+export type MemberResponse = 'pending' | 'accepted';
 export type ContactExchangeRequest = z.infer<typeof contactExchangeRequestSchema>;
 
 export interface OkResponse {
@@ -167,6 +171,9 @@ export interface GroupMember {
   // per-person "We met" action, which is now the ONLY way a matched group forms edges (completing a matched
   // group no longer auto-connects everyone; ending a meetup still does).
   met: boolean;
+  // Added Sep 26 (wave 4): this member has accepted the proposed group (always true in a meetup or once the group
+  // is confirmed). Shown for redacted members too — a tick isn't identifying.
+  accepted: boolean;
 }
 
 export interface MatchRunResponse {
@@ -216,6 +223,10 @@ export interface GroupResponse {
   roomCode: string | null;
   codeExpiresAt: string | null;
   icebreakers: string[];
+  // Added Sep 26 (wave 4): per-member acceptance. A matched group stays 'proposed' until every remaining member
+  // has accepted; `myResponse` drives Accept/Decline vs "waiting on N others" in the app.
+  myResponse: MemberResponse;
+  acceptedCount: number;
 }
 
 // Added Sep 26 (wave 2): GET /api/hangouts — every group the viewer is in, matched and meetup alike, for one home
@@ -234,6 +245,9 @@ export interface HangoutSummary {
   roomCode: string | null;
   hostId: string | null;
   isPast: boolean;
+  // Added Sep 26 (wave 4): the viewer still has to accept or decline this proposed group.
+  needsResponse: boolean;
+  acceptedCount: number;
 }
 
 export interface HangoutsResponse {

@@ -73,6 +73,14 @@ function sharedInterests(
     .map(({ label }) => label);
 }
 
+const COUNT_WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+const countWord = (n: number) => COUNT_WORDS[n] ?? String(n);
+
+// CHANGED Sep 26 (wave 4): describes the group's SHAPE instead of one path. "You and Maya both know Alex, and the
+// group shares an interest in coffee" said nothing about the other four people. Now: who you already know, how
+// many are new and through whom (only 1st-degree connectors are named — a degree-2+ member is never named,
+// because the requester hasn't met them and the group view hides them), what everyone shares, and who wants a
+// rematch.
 export function deterministicReasoning(
   input: FormGroupsInput,
   memberIds: string[],
@@ -81,40 +89,68 @@ export function deterministicReasoning(
   const others = memberIds
     .filter((id) => id !== input.requesterId)
     .flatMap((id) => input.candidates.filter((c) => c.id === id));
-
-  let opener: string;
-  const distant = others.find(
-    (c) => c.degree >= 2 && (options.paths?.[c.id]?.length ?? 0) >= 2,
-  );
-  if (distant) {
-    const chain = options.paths?.[distant.id] ?? [];
-    opener =
-      chain.length === 2
-        ? `You and ${chain[1]} both know ${chain[0]}`
-        : `You know ${chain[0]}${chain
-            .slice(1)
-            .map((name) => `, who knows ${name}`)
-            .join('')}`;
-  } else if (others.length > 0) {
-    opener = `You already know ${joinList(others.map((c) => c.displayName))}`;
-  } else {
+  if (others.length === 0) {
     return 'No one in your network is a match yet.';
+  }
+  const known = others.filter((c) => c.degree <= 1);
+  const fresh = others.filter((c) => c.degree >= 2);
+  const sentences: string[] = [];
+
+  if (known.length > 0) {
+    sentences.push(`You already know ${joinList(known.map((c) => c.displayName))}.`);
+  }
+
+  if (fresh.length > 0) {
+    // Group the new people by the 1st-degree person who links you to them (the first name on their path).
+    const via = new Map<string, number>();
+    let unlinked = 0;
+    for (const c of fresh) {
+      const connector = options.paths?.[c.id]?.[0];
+      if (connector && (options.paths?.[c.id]?.length ?? 0) >= 2) via.set(connector, (via.get(connector) ?? 0) + 1);
+      else unlinked += 1;
+    }
+    const parts = [...via.entries()].map(([name, n]) => `${countWord(n)} through ${name}`);
+    if (unlinked > 0 && parts.length > 0) parts.push(`${countWord(unlinked)} further out`);
+    const who = `${countWord(fresh.length).replace(/^\w/, (ch) => ch.toUpperCase())} ${fresh.length === 1 ? 'person is' : 'people are'} new to you`;
+    if (parts.length === 0) {
+      sentences.push(`${who} — friends of friends.`);
+    } else if (via.size === 1 && unlinked === 0) {
+      const [name] = [...via.keys()];
+      sentences.push(`${who}, ${fresh.length === 1 ? '' : fresh.length === 2 ? 'both ' : 'all '}through ${name}.`);
+    } else {
+      sentences.push(`${who} — ${joinList(parts)}.`);
+    }
   }
 
   const shared = sharedInterests(input, memberIds, options).slice(0, 3);
-  const sharedClause =
+  sentences.push(
     shared.length > 0
-      ? `the group shares an interest in ${joinList(shared)}`
-      : 'your plans and budgets line up';
+      ? `Everyone here is into ${joinList(shared)}.`
+      : 'Your plans and budgets line up.',
+  );
+
   // Past "would meet again" feedback is the demo's "matching improved" beat, so say it when it drove the pick.
-  const again = others
+  // Only people you've actually met can have said it, so naming them is safe.
+  const again = known
     .filter((c) => (options.signals?.[c.id]?.meetAgain ?? 0) > 0)
     .map((c) => c.displayName);
-  if (again.length === 0) {
-    return `${opener}, and ${sharedClause}.`;
+  if (again.length > 0) {
+    sentences.push(`${joinList(again)} ${again.length === 1 ? 'wants' : 'want'} to hang out with you again.`);
   }
-  const verb = again.length === 1 ? 'wants' : 'want';
-  return `${opener}. ${joinList(again)} ${verb} to hang out again, and ${sharedClause}.`;
+  return sentences.join(' ');
+}
+
+// Does the text name anyone the requester hasn't met? Full name or first name (3+ letters), whole word.
+export function namesUnmetMember(reasoning: string, input: FormGroupsInput, memberIds: string[]): boolean {
+  const lower = reasoning.toLowerCase();
+  return input.candidates
+    .filter((c) => memberIds.includes(c.id) && c.degree >= 2)
+    .some((c) => {
+      const full = c.displayName.trim().toLowerCase();
+      const first = full.split(/\s+/)[0] ?? '';
+      const hit = (value: string) => value.length >= 3 && new RegExp(`\\b${value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(lower);
+      return hit(full) || hit(first);
+    });
 }
 
 // Top-N by stage-2 score (pool-relative similarity + small meet-again boost): candidates arrive in that order.
@@ -192,6 +228,10 @@ export function sanitizeModelGroup(
   if (valid.some(distant) && options.paths && !namesPath) {
     changed = true;
   }
+  // Wave 4: never show the requester a name they're not allowed to see yet.
+  if (namesUnmetMember(reasoning, input, memberIds)) {
+    changed = true;
+  }
   return {
     memberIds,
     reasoning:
@@ -238,9 +278,14 @@ Pick the members (excluding the requester) for one group that will enjoy an acti
 - Respect everyone's budget, travel radius, frequency, and group size softly.
 - Only use ids from the candidate list.
 
-Return JSON: {"memberIds": string[], "reasoning": string}. reasoning is at most two sentences in second person,
-shown to the requester. If any chosen member has degree 2 or more, name their connection path, e.g.
-"You and Maya both know Chris". If you chose someone because they'd meet again, say so.`;
+Return JSON: {"memberIds": string[], "reasoning": string}. reasoning is two or three short sentences in second
+person, shown to the requester, describing the SHAPE of the group:
+- who they already know (degree 1 — name them),
+- how many people are new to them and through whom, e.g. "Three people are new to you — two through Maya, one
+  through Chris" (name only the degree-1 connector from connectionPath, NEVER the degree-2+ person themselves:
+  the requester hasn't met them and their name is hidden in the app),
+- what the whole group shares (interests, budget, or pace),
+- and, if it drove the pick, who wants to hang out again.`;
 }
 
 async function generateWithGemini(

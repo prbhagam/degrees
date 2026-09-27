@@ -107,8 +107,8 @@ export function PreferencesScreen() {
       {inOnboarding ? <Muted>Step 3 of 3</Muted> : null}
       <Text className="mt-2 font-display text-2xl text-ink">How many degrees out should we reach?</Text>
       <Body className="mt-1 text-muted">
-        You're degree 0. The people you've met are your 1st degree, their people are your 2nd. This is the one dial
-        that matters most — change it anytime.
+        People you've met are your 1st degree; their friends are your 2nd. This is the dial that matters most —
+        change it anytime.
       </Body>
 
       <View className="mt-4 gap-2.5">

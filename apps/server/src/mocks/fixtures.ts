@@ -198,6 +198,7 @@ export const matchFixture = {
       sharedInterests: ['hackathons'],
       revealed: true,
       met: false,
+      accepted: true,
     },
     {
       id: people[1].id,
@@ -208,6 +209,7 @@ export const matchFixture = {
       sharedInterests: ['coffee'],
       revealed: true,
       met: true,
+      accepted: true,
     },
     {
       id: null,
@@ -218,6 +220,7 @@ export const matchFixture = {
       sharedInterests: ['Atlanta food'],
       revealed: false,
       met: false,
+      accepted: true,
     },
     {
       id: null,
@@ -228,6 +231,7 @@ export const matchFixture = {
       sharedInterests: ['bouldering'],
       revealed: false,
       met: false,
+      accepted: true,
     },
   ],
   unrevealedCount: 2,
@@ -253,6 +257,7 @@ export const groupFixture = {
       sharedInterests: ['hackathons'],
       revealed: true,
       met: false,
+      accepted: true,
     },
     {
       id: people[1].id,
@@ -263,6 +268,7 @@ export const groupFixture = {
       sharedInterests: ['coffee'],
       revealed: true,
       met: true,
+      accepted: true,
     },
     {
       id: people[3].id,
@@ -273,6 +279,7 @@ export const groupFixture = {
       sharedInterests: ['Atlanta food'],
       revealed: true,
       met: false,
+      accepted: true,
     },
     {
       id: people[5].id,
@@ -283,6 +290,7 @@ export const groupFixture = {
       sharedInterests: ['bouldering'],
       revealed: true,
       met: false,
+      accepted: true,
     },
   ],
   unrevealedCount: 0,
@@ -314,6 +322,8 @@ export const groupFixture = {
   roomCode: null,
   codeExpiresAt: null,
   icebreakers: [],
+  myResponse: 'accepted',
+  acceptedCount: 4,
 } satisfies GroupResponse;
 
 // Added Sep 26 (wave 2): the home list — the demo group plus a wrapped-up meetup for the "past" section.
@@ -332,6 +342,8 @@ export const hangoutsFixture = {
       roomCode: null,
       hostId: null,
       isPast: false,
+      needsResponse: false,
+      acceptedCount: 4,
     },
     {
       id: DEMO_MEETUP_GROUP_ID,
@@ -346,6 +358,8 @@ export const hangoutsFixture = {
       roomCode: null,
       hostId: people[2].id,
       isPast: true,
+      needsResponse: false,
+      acceptedCount: 4,
     },
   ],
 } satisfies HangoutsResponse;

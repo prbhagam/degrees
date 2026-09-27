@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import {
   addPhotoRequestSchema,
   exchangeRequestSchema,
+  renameGroupRequestSchema,
   respondRequestSchema,
   restoreActivityRequestSchema,
   type Activity,
@@ -32,6 +33,8 @@ import {
   loadGroup,
   meetupForGroup,
   memberRows,
+  renameGroup,
+  respondToGroup,
   restoreActivity,
   saveActivity,
   saveIcebreakers,
@@ -91,6 +94,8 @@ let mockStatus: GroupResponse['status'] = groupFixture.status;
 const mockPhotos: Photo[] = [];
 let mockIcebreakers: string[] = [];
 let mockLeft = false;
+let mockName: string | null = groupFixture.name;
+let mockMyResponse: GroupResponse['myResponse'] = groupFixture.myResponse;
 
 function assertMockGroup(groupId: string): void {
   if (groupId !== DEMO_GROUP_ID || mockLeft) {
@@ -165,6 +170,9 @@ export const groupRoutes = new Hono<AppEnv>()
         activityHistory: mockActivityHistory,
         completedAt: mockCompletedAt,
         icebreakers: mockIcebreakers,
+        name: mockName,
+        myResponse: mockMyResponse,
+        acceptedCount: mockMyResponse === 'accepted' ? groupFixture.members.length : groupFixture.members.length - 1,
       } satisfies GroupResponse;
       return context.json(response);
     }
@@ -214,41 +222,35 @@ export const groupRoutes = new Hono<AppEnv>()
     const { accept } = await validateJson(context, respondRequestSchema);
     if (env.mockMode) {
       assertMockGroup(groupId);
-      if (accept) mockStatus = 'confirmed';
+      // The fixture's other members have all accepted, so the caller's yes is the last one.
+      if (accept) {
+        mockMyResponse = 'accepted';
+        mockStatus = 'confirmed';
+      } else {
+        mockLeft = true;
+      }
       const response = { ok: true } satisfies OkResponse;
       return context.json(response);
     }
-    // Only members can accept or decline; accepting confirms the group for everyone (team decision 2).
-    await memberRows(groupId, userId);
-    const db = getServiceClient();
-    if (accept) {
-      const { error } = await db
-        .from('groups')
-        .update({ status: 'confirmed' })
-        .eq('id', groupId)
-        .eq('status', 'proposed');
-      if (error) {
-        throw new ApiError(
-          500,
-          'update_failed',
-          'Failed to accept the hangout.',
-        );
-      }
-    } else {
-      // Decline removes only the caller, not the group — others may still want it.
-      const { error } = await db
-        .from('group_members')
-        .delete()
-        .eq('group_id', groupId)
-        .eq('user_id', userId);
-      if (error) {
-        throw new ApiError(
-          500,
-          'update_failed',
-          'Failed to decline the hangout.',
-        );
-      }
+    // CHANGED Sep 26 (wave 4): each member answers for themselves — see lib/groups.ts respondToGroup.
+    await respondToGroup(groupId, userId, accept);
+    log.info('groups.responded', { userId, groupId, accept });
+    const response = { ok: true } satisfies OkResponse;
+    return context.json(response);
+  })
+  // Added Sep 26 (wave 4): rename a group or meetup.
+  .put('/groups/:id', async (context) => {
+    const groupId = context.req.param('id');
+    const userId = context.get('userId');
+    const { name } = await validateJson(context, renameGroupRequestSchema);
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      mockName = name;
+      const response = { ok: true } satisfies OkResponse;
+      return context.json(response);
     }
+    await renameGroup(groupId, userId, name);
+    log.info('groups.renamed', { userId, groupId });
     const response = { ok: true } satisfies OkResponse;
     return context.json(response);
   })

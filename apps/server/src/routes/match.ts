@@ -9,6 +9,7 @@ import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from '../lib/errors.js';
 import { profileBasics } from '../lib/graph.js';
+import { redactReasoning } from '../lib/groups.js';
 import { log, timed } from '../lib/log.js';
 import { firstMissingStep, loadProfileStatus } from '../lib/profileStatus.js';
 import { formGroups } from '../matching/formGroups.js';
@@ -237,6 +238,7 @@ export const matchRoutes = new Hono<AppEnv>().post(
         ),
         revealed: true,
         met: false,
+        accepted: true,
       },
       ...others.map((c): MatchRunResponse['members'][number] =>
         c.degree <= 1
@@ -249,6 +251,7 @@ export const matchRoutes = new Hono<AppEnv>().post(
               sharedInterests: sharedWith(c.interests),
               revealed: true,
               met: c.degree === 1,
+              accepted: false,
             }
           : {
               id: null,
@@ -259,6 +262,7 @@ export const matchRoutes = new Hono<AppEnv>().post(
               sharedInterests: sharedWith(c.interests),
               revealed: false,
               met: false,
+              accepted: false,
             },
       ),
     ];

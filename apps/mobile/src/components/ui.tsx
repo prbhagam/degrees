@@ -1,6 +1,7 @@
 // Owner: shared mobile scaffold (Charles) — the app's one UI kit. Was src/features/groups/ui.tsx;
 // moved here because every feature uses it, not just groups. CHANGED Sep 26: restyled from the
 // original violet/rounded-2xl look to the validated ember/paper/Fraunces+PublicSans design.
+import { DegreesMark } from './DegreesMark';
 import { useState, type ReactNode } from 'react';
 import {
   ActivityIndicator,
@@ -226,10 +227,11 @@ export function DegreeBadge({ label, tone = 'met' }: { label: string; tone?: 'yo
   );
 }
 
+// CHANGED Sep 26 (wave 4): the loading indicator is the Degrees mark with its node orbiting.
 export function LoadingState({ label }: { label: string }) {
   return (
     <View className="items-center gap-3 py-16">
-      <ActivityIndicator size="large" color="#E8703A" />
+      <DegreesMark size={52} animated />
       <Muted>{label}</Muted>
     </View>
   );

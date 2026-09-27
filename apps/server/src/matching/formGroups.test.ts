@@ -54,14 +54,24 @@ await test('fallback takes requester + top (max - 1) candidates in rank order', 
   assert.deepEqual(group.memberIds, ['me', 'c0', 'c1', 'c2', 'c3']);
 });
 
-await test('fallback reasoning names a degree-2 path and shared interests', () => {
+await test('fallback reasoning describes the shape: who you know, how many are new and through whom, shared ground', () => {
   const { reasoning } = fallbackGroup(input, options);
-  assert.equal(reasoning, 'You and Maya both know Alex, and the group shares an interest in coffee, design, and soccer.');
+  assert.equal(
+    reasoning,
+    'You already know Alex and Priya. Two people are new to you, both through Alex. Everyone here is into coffee, design, and soccer.',
+  );
 });
 
-await test('fallback reasoning renders a full degree-3 chain', () => {
+await test('fallback reasoning never names a degree-3 member, only the 1st-degree connector', () => {
   const { reasoning } = fallbackGroup({ ...input, candidates: input.candidates.slice(6) }, options);
-  assert.match(reasoning, /^You know Alex, who knows Maya, who knows Nina/);
+  assert.match(reasoning, /^Four people are new to you, all through Alex\./);
+  for (const name of ['Nina', 'Ethan', 'Noah', 'Sofia']) assert.ok(!reasoning.includes(name), `${name} leaked`);
+});
+
+await test('fallback reasoning groups new people by connector', () => {
+  const mixed = { ...options, paths: { ...paths, c3: ['Priya', 'Sam'] } };
+  const { reasoning } = fallbackGroup(input, mixed);
+  assert.match(reasoning, /Two people are new to you — one through Alex and one through Priya\./);
 });
 
 await test('fallback with only degree-1 candidates says who you already know', () => {
@@ -74,19 +84,27 @@ await test('fallback reasoning credits past "would meet again" feedback', () => 
     ...options,
     signals: { c0: { score: 1.2, meetAgain: 2 }, c2: { score: 1, meetAgain: 1 } },
   });
-  assert.equal(
-    reasoning,
-    'You and Maya both know Alex. Alex and Maya want to hang out again, and the group shares an interest in coffee, design, and soccer.',
-  );
+  // Maya (c2) is degree 2 — never named, even with a meet-again signal; Alex is.
+  assert.match(reasoning, /Alex wants to hang out with you again\.$/);
+  assert.ok(!reasoning.includes('Maya'));
 });
 
 await test('valid model output is kept as-is, requester first', async () => {
   const group = await formGroups(input, {
     ...options,
-    generate: reply({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'You and Zoe both know Alex. Enjoy!' }),
+    generate: reply({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'Three people are new to you, all through Alex. Enjoy!' }),
   });
   assert.deepEqual(group.memberIds, ['me', 'c4', 'c2', 'c5']);
-  assert.equal(group.reasoning, 'You and Zoe both know Alex. Enjoy!');
+  assert.equal(group.reasoning, 'Three people are new to you, all through Alex. Enjoy!');
+});
+
+await test('model reasoning that names someone the requester has not met is replaced', async () => {
+  const group = await formGroups(input, {
+    ...options,
+    generate: reply({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'You and Zoe both know Alex. Enjoy!' }),
+  });
+  assert.match(group.reasoning, /^Three people are new to you, all through Alex\./);
+  assert.ok(!group.reasoning.includes('Zoe'));
 });
 
 await test('model reasoning that never names the connecting person is replaced', async () => {
@@ -95,7 +113,7 @@ await test('model reasoning that never names the connecting person is replaced',
     generate: reply({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'Model says hi.' }),
   });
   assert.deepEqual(group.memberIds, ['me', 'c4', 'c2', 'c5']);
-  assert.match(group.reasoning, /^You and Zoe both know Alex/);
+  assert.match(group.reasoning, /^Three people are new to you, all through Alex/);
 });
 
 await test('a model group with no friend-of-a-friend gets the best-scoring one swapped in', async () => {
@@ -105,7 +123,7 @@ await test('a model group with no friend-of-a-friend gets the best-scoring one s
     generate: reply({ memberIds: ['c0', 'c1'], reasoning: 'You already know them.' }),
   });
   assert.deepEqual(appended.memberIds, ['me', 'c0', 'c1', 'c2']);
-  assert.match(appended.reasoning, /^You and Maya both know Alex/);
+  assert.match(appended.reasoning, /^You already know Alex and Priya\. One person is new to you, through Alex\./);
   // At max (5 with the requester): the model's last pick makes room.
   const onlyDirect = { ...input, candidates: input.candidates.map((c, index) => (index < 5 ? { ...c, degree: 1 } : c)) };
   const swapped = await formGroups(onlyDirect, {
@@ -122,11 +140,11 @@ await test('First model failing falls through to second before the deterministic
     generate: async (_prompt, _signal, model) => {
       models.push(model);
       if (models.length === 1) throw new Error('503');
-      return JSON.stringify({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'You and Zoe both know Alex.' });
+      return JSON.stringify({ memberIds: ['c4', 'c2', 'c5'], reasoning: 'Three new people, all through Alex.' });
     },
   });
   assert.deepEqual(models, ['gemini-3.5-flash-lite', 'gemini-3.8-flash']);
-  assert.equal(group.reasoning, 'You and Zoe both know Alex.');
+  assert.equal(group.reasoning, 'Three new people, all through Alex.');
 });
 
 await test('unknown + duplicate ids are dropped, underfill is backfilled, reasoning replaced', async () => {

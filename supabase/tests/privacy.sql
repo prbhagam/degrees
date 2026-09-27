@@ -56,3 +56,14 @@ begin
     raise exception 'group_members and groups must be in supabase_realtime (0010)';
   end if;
 end $$;
+
+-- Wave 4 (0011): group_members.accepted_at exists and match_create_group marks the requester accepted.
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'group_members' and column_name = 'accepted_at'
+  ) then
+    raise exception 'group_members.accepted_at missing (0011)';
+  end if;
+end $$;

@@ -5,6 +5,7 @@ import { Stack, useRouter, type Href } from 'expo-router';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { ErrorState, LoadingState, Muted, Screen } from '@/components/ui';
 import { useNotifications } from './queries';
+import { usePullToRefresh } from '@/lib/query';
 
 const COPY: Record<Notification['type'], (payload: Record<string, unknown>) => { title: string; subtitle: string }> = {
   hangout_invited: (p) => ({ title: 'New hangout suggested for you', subtitle: String(p.name ?? 'Take a look') }),
@@ -23,11 +24,11 @@ function targetFor(notification: Notification): Href {
     case 'hangout_invited':
     case 'hangout_forming':
     case 'message_received':
-      return id ? { pathname: '/groups/[id]', params: { id } } : '/index';
+      return id ? { pathname: '/groups/[id]', params: { id } } : '/';
     case 'feedback_prompt':
     case 'exchange_requested':
     case 'exchange_accepted':
-      return id ? { pathname: '/groups/[id]/feedback', params: { id } } : '/index';
+      return id ? { pathname: '/groups/[id]/feedback', params: { id } } : '/';
     case 'connection_added':
       return '/circle';
   }
@@ -36,11 +37,12 @@ function targetFor(notification: Notification): Href {
 export function NotificationsScreen() {
   const router = useRouter();
   const notifications = useNotifications();
+  const pull = usePullToRefresh(notifications.refetch);
 
   return (
     <Screen
       refreshControl={
-        <RefreshControl refreshing={notifications.isRefetching} onRefresh={() => void notifications.refetch()} />
+        <RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />
       }
     >
       <Stack.Screen options={{ title: 'Notifications' }} />

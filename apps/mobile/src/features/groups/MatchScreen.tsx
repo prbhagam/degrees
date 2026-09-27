@@ -101,12 +101,9 @@ export function MatchScreen() {
             : 'Meet your next group'}
         </Text>
         <Body className="text-center">
-          Degrees starts at you (degree 0), walks out through your 1st degree and theirs,
-          then picks a small group that should get along in person.
+          Degrees walks out from you — through the people you've met, then theirs — and picks a small
+          group that should get along in person.
         </Body>
-        <Muted className="text-center">
-          How many degrees out it reaches is your setting — 1st only, 2nd, or 3rd.
-        </Muted>
       </View>
       {incomplete ? (
         <ErrorState

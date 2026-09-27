@@ -198,4 +198,6 @@ export const api = {
     request<Activity>(`${groupPath(id)}/activity/restore`, json('POST', { activityId })),
   exchangeContact: (peerId: string) =>
     request<ExchangeResponse>('/api/graph/exchange', json('POST', { peerId })),
+  // Added Sep 26 (wave 4): rename a group or meetup.
+  renameGroup: (id: string, name: string) => request<OkResponse>(groupPath(id), json('PUT', { name })),
 };

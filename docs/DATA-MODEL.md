@@ -115,6 +115,7 @@ group_members (
   group_id      uuid references groups,
   user_id       uuid references profiles,
   degree        int,               -- degrees of separation from the requesting user
+  accepted_at   timestamptz,       -- wave 4 (0011): null until this member accepts; the group confirms when none are null
   primary key (group_id, user_id)
 )
 
@@ -240,6 +241,10 @@ notifications (
 **Contact exchange never has client grants.** `contact_exchanges` and `connection_contacts` (wave 3) have RLS enabled but zero policies — every read and write goes through the API server (service-role), because whether a phone number is revealed must be computed server-side from both `a_accepted`/`b_accepted` flags, never trusted from the client. Wave 3 moved the feature to Your Circle and keyed it on the pair, so a swapped number outlives the group it happened in.
 
 **`profile_tags.kind = 'avoid'` is a constraint, not an interest (wave 3).** Every reader splits by kind: the planner turns avoids into hard rules, icebreakers and the match reasoning ignore them, `match_narrow` (redefined in 0010) leaves them out of `interests`, and the embedding puts them on their own "Prefers to skip:" line. Before 0010 they were aggregated with everything else, which is how "avoid alcohol" produced pub recommendations.
+
+**Every member accepts for themselves (wave 4).** `groups.status` stays `proposed` until every `group_members.accepted_at` is set; `match_create_group` (redefined in 0011) creates the requester's row already accepted, meetup joins set it on insert, and `POST /api/groups/:id/respond` sets the caller's. One person's yes no longer confirms the group for everyone. Redaction is unchanged: names past 1st degree unlock when the group confirms, i.e. when everyone is in.
+
+**"Why this group" is redacted per viewer (wave 4).** The reasoning is stored once per group but served through `redactReasoning()` (lib/groups.ts) in `GET /groups/:id`, `POST /match/run`, and `GET /hangouts`, replacing the full and first names of anyone the viewer hasn't met with "someone new". `formGroups` is also told never to name a degree-2+ member and falls back to the deterministic text if it does; the deterministic text now describes the group's shape (who you know, how many are new and through whom, shared ground).
 
 **Leaving a meetup undoes only its own edges (wave 3).** `POST /api/groups/:id/leave` on a live meetup deletes the leaver's `connections` rows where `event_id` is that meetup's event. Because `POST /api/connections` and the end-of-meetup upsert both `ON CONFLICT DO NOTHING`, an edge's `event_id` records where it was first made — so a pair that already knew each other keeps their original row and is unaffected. Lobby "We met" taps send `eventId` for exactly this reason. Completed hangouts still can't be left.
 

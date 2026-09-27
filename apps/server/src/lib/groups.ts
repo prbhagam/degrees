@@ -71,6 +71,8 @@ export const groupNotFound = () =>
 interface MemberRow {
   user_id: string;
   degree: number | null;
+  // wave 4: null until this member accepts the proposed group.
+  accepted_at: string | null;
 }
 
 // Non-members get the same 404 as a missing group, so group ids don't leak.
@@ -83,7 +85,7 @@ export async function memberRows(
   }
   const { data, error } = await getServiceClient()
     .from('group_members')
-    .select('user_id, degree')
+    .select('user_id, degree, accepted_at')
     .eq('group_id', groupId);
   if (error) {
     throw new Error(`group_members read failed: ${error.message}`);
@@ -93,6 +95,26 @@ export async function memberRows(
     throw groupNotFound();
   }
   return rows;
+}
+
+// Added Sep 26 (wave 4): the "Why this group" text can't name anyone the viewer hasn't met. formGroups is told not
+// to, but the text is stored once per group while redaction is per viewer, so this scrubs it on the way out.
+// Full names first, then first names (3+ letters), whole-word, case-insensitive.
+export function redactReasoning(reasoning: string, hiddenNames: string[]): string {
+  let text = reasoning;
+  const escape = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const replacements = new Set<string>();
+  for (const name of hiddenNames) {
+    const full = name.trim();
+    if (!full) continue;
+    replacements.add(full);
+    const first = full.split(/\s+/)[0] ?? '';
+    if (first.length >= 3) replacements.add(first);
+  }
+  for (const value of [...replacements].sort((a, b) => b.length - a.length)) {
+    text = text.replace(new RegExp(`\\b${escape(value)}\\b`, 'gi'), 'someone new');
+  }
+  return text;
 }
 
 // Chat and photo uploads close this long after a hangout is marked done (the app hides the
@@ -300,7 +322,8 @@ export async function loadGroup(
   // a proposed group is itself a commitment to meet, so revealed also flips true once the group
   // leaves 'proposed' — otherwise this and ChatScreen (which needs a real sender name to
   // coordinate) would contradict each other for the exact people you're actively meeting up with.
-  const members: GroupMember[] = rows.map(({ user_id: id, degree }) => {
+  const hiddenNames: string[] = [];
+  const members: GroupMember[] = rows.map(({ user_id: id, degree, accepted_at }) => {
     const path = reach.get(id);
     // Degrees are relative to whoever is looking; fall back to the stored matching degree if unreachable.
     // Meetup members have no stored degree (they joined a code) — unreachable means "network", never "you".
@@ -317,6 +340,8 @@ export async function loadGroup(
             viewerTags.has(label.toLowerCase()),
           );
     const profile = basics.get(id);
+    const accepted = accepted_at !== null;
+    if (!revealed && profile?.displayName) hiddenNames.push(profile.displayName);
     return revealed
       ? {
           id,
@@ -327,6 +352,7 @@ export async function loadGroup(
           sharedInterests,
           revealed: true,
           met,
+          accepted,
         }
       : {
           id: null,
@@ -337,10 +363,14 @@ export async function loadGroup(
           sharedInterests,
           revealed: false,
           met: false,
+          accepted,
         };
   });
   members.sort((a, b) => a.degree - b.degree);
   const unrevealedCount = members.filter((member) => !member.revealed).length;
+  const viewerRow = rows.find((row) => row.user_id === viewerId);
+  const myResponse = viewerRow?.accepted_at ? 'accepted' : 'pending';
+  const acceptedCount = rows.filter((row) => row.accepted_at !== null).length;
 
   const activityRows = activityResult.data as ActivityRow[];
   const activityRow = activityRows[0];
@@ -359,7 +389,7 @@ export async function loadGroup(
   return {
     id: groupResult.data.id as string,
     status,
-    reasoning: (groupResult.data.reasoning as string | null) ?? '',
+    reasoning: redactReasoning((groupResult.data.reasoning as string | null) ?? '', hiddenNames),
     members,
     unrevealedCount,
     activity,
@@ -374,7 +404,72 @@ export async function loadGroup(
     roomCode: meetup && codeOpen ? meetup.room_code : null,
     codeExpiresAt: meetup && codeOpen ? iso(meetup.code_expires_at) : null,
     icebreakers,
+    myResponse,
+    acceptedCount,
   };
+}
+
+// Added Sep 26 (wave 4): one person's answer to a proposed group. Accepting records only the caller's acceptance;
+// the group flips to 'confirmed' when every remaining member has accepted. Declining removes the caller (the
+// others may still want it) and re-checks, so the last holdout declining can confirm the rest.
+export async function respondToGroup(groupId: string, userId: string, accept: boolean): Promise<void> {
+  await memberRows(groupId, userId);
+  const { status } = await groupState(groupId);
+  const db = getServiceClient();
+  if (accept) {
+    if (status !== 'proposed') return; // already settled — idempotent
+    const { error } = await db
+      .from('group_members')
+      .update({ accepted_at: new Date().toISOString() })
+      .eq('group_id', groupId)
+      .eq('user_id', userId)
+      .is('accepted_at', null);
+    if (error) {
+      throw new ApiError(500, 'update_failed', 'Failed to accept the hangout.');
+    }
+  } else {
+    if (status === 'completed') {
+      throw new ApiError(409, 'group_completed', 'This hangout already happened, so it stays in your history.');
+    }
+    const { error } = await db.from('group_members').delete().eq('group_id', groupId).eq('user_id', userId);
+    if (error) {
+      throw new ApiError(500, 'update_failed', 'Failed to decline the hangout.');
+    }
+  }
+  await confirmIfEveryoneAccepted(groupId);
+}
+
+async function confirmIfEveryoneAccepted(groupId: string): Promise<void> {
+  const db = getServiceClient();
+  const { data, error } = await db.from('group_members').select('accepted_at').eq('group_id', groupId);
+  if (error) {
+    throw new Error(`group_members read failed: ${error.message}`);
+  }
+  // A group of one is nobody's hangout: leave it proposed so the app can say everyone else passed.
+  if (data.length < 2 || data.some((row) => row.accepted_at === null)) return;
+  const { error: updateError } = await db
+    .from('groups')
+    .update({ status: 'confirmed' })
+    .eq('id', groupId)
+    .eq('status', 'proposed');
+  if (updateError) {
+    throw new Error(`groups update failed: ${updateError.message}`);
+  }
+}
+
+// Added Sep 26 (wave 4): any member can rename a group or meetup. A meetup's `events` row keeps the same name so
+// the join lobby and QR-formed connections' "met at" agree.
+export async function renameGroup(groupId: string, userId: string, name: string): Promise<void> {
+  await memberRows(groupId, userId);
+  const db = getServiceClient();
+  const { error } = await db.from('groups').update({ name }).eq('id', groupId);
+  if (error) {
+    throw new Error(`groups update failed: ${error.message}`);
+  }
+  const { error: eventError } = await db.from('events').update({ name }).eq('group_id', groupId);
+  if (eventError) {
+    throw new Error(`events update failed: ${eventError.message}`);
+  }
 }
 
 // Added Sep 26 (wave 2): leave any group you're in that hasn't wrapped up. Proposed: same as declining.

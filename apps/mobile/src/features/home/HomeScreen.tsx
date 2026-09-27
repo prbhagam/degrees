@@ -7,13 +7,15 @@ import type { HangoutSummary } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
 import { Link, Stack, useRouter, type Href } from 'expo-router';
 import { AlertCircle, Bell, CalendarPlus, ChevronRight, Plus, QrCode, Users } from 'lucide-react-native';
+import { DegreesMark } from '@/components/DegreesMark';
+import { usePullToRefresh } from '@/lib/query';
 import type { ReactNode } from 'react';
 import { Pressable, RefreshControl, Text, View } from 'react-native';
 import { useHangouts, useMe } from '@/features/groups/queries';
 import { Button, Card, Heading, Muted, Screen } from '@/components/ui';
 
 const STATUS_LABEL: Record<HangoutSummary['status'], string> = {
-  proposed: 'New match — needs your reply',
+  proposed: 'Waiting on others',
   confirmed: 'Plans on',
   completed: 'Done',
 };
@@ -41,6 +43,11 @@ function hangoutSubtitle(hangout: HangoutSummary): string {
     if (hangout.roomCode) parts.push(`Code ${hangout.roomCode}`);
     parts.push(`${hangout.memberCount} ${hangout.memberCount === 1 ? 'person' : 'people'}`);
     if (hangout.completedAt) parts.push('Ended · leave feedback');
+  } else if (hangout.needsResponse) {
+    parts.push('New match — needs your reply');
+  } else if (hangout.status === 'proposed') {
+    const waiting = hangout.memberCount - hangout.acceptedCount;
+    parts.push(`You're in · waiting on ${waiting} ${waiting === 1 ? 'person' : 'people'}`);
   } else {
     parts.push(STATUS_LABEL[hangout.status]);
     if (hangout.status === 'completed') parts.push('Leave feedback');
@@ -51,7 +58,7 @@ function hangoutSubtitle(hangout: HangoutSummary): string {
 function HangoutRow({ hangout, onPress }: { hangout: HangoutSummary; onPress: () => void }) {
   return (
     <Pressable accessibilityRole="button" onPress={onPress}>
-      <Card className={hangout.isPast ? 'opacity-70' : ''}>
+      <Card className={hangout.isPast ? 'opacity-70' : hangout.needsResponse ? 'border-ember' : ''}>
         <View className="flex-row items-center justify-between">
           <KindTag kind={hangout.kind} />
           <ChevronRight size={18} color="#8A8378" />
@@ -117,7 +124,7 @@ function ProfileNag({ status }: { status: { interests: boolean; about: boolean; 
           <Text className="font-body-semibold text-sm text-ember-ink">Finish setting up</Text>
         </View>
         <Text className="font-body text-sm text-ink">
-          You haven't set up your {missing.join(', ')}. Reaching past your 1st degree can't work without that — tap to finish.
+          You haven't set up your {missing.join(', ')}. Matching can't work without that — tap to finish.
         </Text>
       </Card>
     </Pressable>
@@ -139,6 +146,7 @@ export function HomeScreen() {
   const hangouts = useHangouts();
   const me = useMe();
   const ink = '#20201C';
+  const pull = usePullToRefresh(() => Promise.all([hangouts.refetch(), me.refetch()]));
 
   const list = hangouts.data?.hangouts ?? [];
   const active = list.filter((hangout) => !hangout.isPast);
@@ -146,25 +154,20 @@ export function HomeScreen() {
 
   return (
     <Screen
-      refreshControl={
-        <RefreshControl
-          refreshing={hangouts.isRefetching}
-          onRefresh={() => {
-            void hangouts.refetch();
-            void me.refetch();
-          }}
-        />
-      }
+      refreshControl={<RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />}
     >
       <Stack.Screen
         options={{
+          // Wave 4: the mark sits with the title; "+" is gone (Host a meetup is right below).
+          headerLeft: () => (
+            <View className="pl-4">
+              <DegreesMark size={24} />
+            </View>
+          ),
           headerRight: () => (
             <View className="flex-row items-center gap-4">
               <Pressable accessibilityLabel="Notifications" onPress={() => router.push('/notifications')}>
                 <Bell size={20} color={ink} />
-              </Pressable>
-              <Pressable accessibilityLabel="Host a meetup" onPress={() => router.push('/create-event')}>
-                <Plus size={22} color={ink} />
               </Pressable>
             </View>
           ),
@@ -180,18 +183,17 @@ export function HomeScreen() {
           <HangoutRow key={hangout.id} hangout={hangout} onPress={() => router.push(`/groups/${hangout.id}`)} />
         ))}
         {hangouts.data && active.length === 0 ? (
-          <Muted>Nothing on right now. Meet a few people in person (your 1st degree), then find your first group.</Muted>
+          <Muted>Nothing on right now. Meet a few people, then find your first group.</Muted>
         ) : null}
         <Button label="Find my group" icon={<Users size={18} color="#F7F3EC" />} onPress={() => router.push('/match')} />
-        <Muted>Degrees reaches through your 1st degree, then theirs — as far as you've set.</Muted>
       </View>
 
       <View className="gap-3">
-        <Heading>Grow your 1st degree</Heading>
+        <Heading>Grow your circle</Heading>
         <ActionRow
           icon={<QrCode size={22} color={ink} />}
           title="Meet someone"
-          subtitle="Show your code or scan theirs — that's a 1st-degree edge"
+          subtitle="Show your code or scan theirs"
           onPress={() => router.push('/connect')}
         />
         <ActionRow

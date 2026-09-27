@@ -25,7 +25,7 @@ import {
 import { Button, ErrorState, LoadingState, Muted, Screen } from '@/components/ui';
 import { api } from '@/lib/api';
 import { queryKeys, useGroup } from '@/features/groups/queries';
-import { LIVE_POLL_MS } from '@/lib/query';
+import { LIVE_POLL_MS, usePullToRefresh } from '@/lib/query';
 import { pickImage, uploadGroupPhoto } from '@/lib/upload';
 
 const ARCHIVE_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -153,6 +153,7 @@ export function PhotosScreen() {
     refetchInterval: LIVE_POLL_MS,
   });
 
+  const pull = usePullToRefresh(photos.refetch);
   const completedAt = group.data?.completedAt;
   const archived = Boolean(completedAt && Date.now() - new Date(completedAt).getTime() > ARCHIVE_GRACE_MS);
   const endedNotArchived = Boolean(completedAt) && !archived;
@@ -174,7 +175,7 @@ export function PhotosScreen() {
 
   return (
     <Screen
-      refreshControl={<RefreshControl refreshing={photos.isRefetching} onRefresh={() => void photos.refetch()} />}
+      refreshControl={<RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />}
     >
       <Stack.Screen options={{ title: 'Photos' }} />
       {photos.isPending || group.isPending ? <LoadingState label="Loading photos…" /> : null}

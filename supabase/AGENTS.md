@@ -23,9 +23,12 @@ migrations/0009_activity_jobs.sql        wave 2 (Sahith): activities.job jsonb �
 migrations/0010_plan_history_realtime_contacts.sql  wave 3 (Sahith): activities.created_at (plans are kept; newest = current),
                                          group_members (replica identity full) + groups in the Realtime publication,
                                          connection_contacts (pair-keyed phone exchange, zero client grants), match_narrow
-                                         redefined so 'avoid' tags never count as interests. Idempotent..
+                                         redefined so 'avoid' tags never count as interests. Idempotent.
+migrations/0011_member_acceptance.sql    wave 4 (Sahith): group_members.accepted_at (per-member accept; backfilled for meetups,
+                                         confirmed/completed groups, and requesters), match_create_group redefined to create the
+                                         requester already accepted. Idempotent..
 seed/seed.ts                             replaces 0002's placeholder vectors with real Gemini embeddings (`npm run seed`)
-tests/run-local.sh + matching.sql + privacy.sql   0001 + 0003–0010 on a throwaway local Postgres (with a storage shim) and assertions
+tests/run-local.sh + matching.sql + privacy.sql   0001 + 0003–0011 on a throwaway local Postgres (with a storage shim) and assertions
 tsconfig.json                            lets `npm run typecheck` cover seed.ts
 ```
 
@@ -50,7 +53,7 @@ tsconfig.json                            lets `npm run typecheck` cover seed.ts
 
 ## Changing the schema
 
-Add a **new** numbered migration (next is `0011_…sql`). Never edit `0001` once it has been applied to the shared project. If a column change affects an API shape, update `packages/shared` and `docs/API-CONTRACTS.md` in the same PR.
+Add a **new** numbered migration (next is `0012_…sql`). Never edit `0001` once it has been applied to the shared project. If a column change affects an API shape, update `packages/shared` and `docs/API-CONTRACTS.md` in the same PR.
 
 To test locally without the Supabase CLI, apply the migration to a throwaway Postgres with a small shim: an `auth` schema, `auth.users`, `auth.uid()`, the `anon` and `authenticated` roles, and a `supabase_realtime` publication. pgvector isn't installed via Homebrew by default, so stub the vector column or install the extension.
 
@@ -58,7 +61,7 @@ To test locally without the Supabase CLI, apply the migration to a throwaway Pos
 
 1. Applied on the shared project: `0002`–`0006` (Sep 26; `0006` went live together with PR #14's server, since each breaks the other's predecessor). Verified live: 0006's columns and tables exist, and the 24 seeded feedback rows became `great`.
    **`0007`–`0009` are applied** (verified Sep 26 ~23:50 UTC: `events.group_id`, `activities.status`, `activities.job` all exist on the shared project).
-   **`0010` (wave 3) is NOT applied yet.** Apply it before the wave-3 server deploys: the group read orders `activities` by `created_at`, the graph route reads `connection_contacts`, and the app subscribes to `group_members`/`groups` changes.
+   **`0010` (wave 3) and `0011` (wave 4) are NOT applied yet.** Apply both, in order, before the wave-3/4 server deploys: the group read orders `activities` by `created_at` and selects `group_members.accepted_at`, the graph route reads `connection_contacts`, and the app subscribes to `group_members`/`groups` changes.
 2. `npm run seed` — re-embeds every profile with Gemini (`gemini-embedding-001`, 768 dims, `SEMANTIC_SIMILARITY`).
    Needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY` in the root `.env`. Safe to rerun.
 
