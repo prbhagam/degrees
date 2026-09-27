@@ -53,7 +53,7 @@ export function LoginScreen() {
       <View className="flex-1 justify-center gap-8">
         <View>
           <Text className="font-display text-3xl text-ink">Welcome back.</Text>
-          <Body className="mt-2 text-muted">Real friends. Real hangouts. No swiping.</Body>
+          <Body className="mt-2 text-muted">Real friends, a few degrees apart. No swiping.</Body>
         </View>
 
         <View className="gap-4">

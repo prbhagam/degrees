@@ -95,7 +95,8 @@ export const matchRoutes = new Hono<AppEnv>().post(
         .select('username, display_name')
         .eq('id', userId)
         .maybeSingle(),
-      supabase.from('profile_tags').select('label').eq('user_id', userId),
+      // Wave 3: 'avoid' tags are constraints, not interests — they must not read as shared ground in the reasoning.
+      supabase.from('profile_tags').select('label').eq('user_id', userId).neq('kind', 'avoid'),
       supabase
         .from('preferences')
         .select(

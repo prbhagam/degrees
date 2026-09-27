@@ -58,7 +58,7 @@ export function SignupScreen() {
     <Screen>
       <Stack.Screen options={{ title: 'Sign up', headerBackButtonDisplayMode: 'minimal' }} />
       <Text className="font-display text-2xl text-ink">Create your account</Text>
-      <Body className="mt-1 text-muted">Takes about two minutes.</Body>
+      <Body className="mt-1 text-muted">Takes about two minutes. You start at degree 0 — everyone else is measured from you.</Body>
 
       <View className="mt-6 gap-4">
         <Field label="Full name" value={name} onChangeText={setName} placeholder="Alexandra Okonkwo-Bennett" />

@@ -79,8 +79,8 @@ export function ConnectPeerScreen() {
                 : `You and ${peerName} were already connected`}
             </Text>
             <Body className="text-center">
-              {eventName ? `Met at ${eventName}. ` : ''}They'll show up in your circle now —
-              nothing past that changes yet.
+              {eventName ? `Met at ${eventName}. ` : ''}You're each other's 1st degree now — and their
+              1st degree just became your 2nd.
             </Body>
           </Card>
           <Button

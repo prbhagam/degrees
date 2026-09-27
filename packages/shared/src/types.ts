@@ -12,6 +12,8 @@ import type {
   notificationTypeSchema,
   respondRequestSchema,
   addPhotoRequestSchema,
+  contactExchangeRequestSchema,
+  restoreActivityRequestSchema,
   sendMessageRequestSchema,
   signupRequestSchema,
   updatePreferencesRequestSchema,
@@ -76,6 +78,8 @@ export type CreateEventRequest = z.infer<typeof createEventRequestSchema>;
 export type ExchangeRequest = z.infer<typeof exchangeRequestSchema>;
 export type RespondRequest = z.infer<typeof respondRequestSchema>;
 export type AddPhotoRequest = z.infer<typeof addPhotoRequestSchema>;
+export type RestoreActivityRequest = z.infer<typeof restoreActivityRequestSchema>;
+export type ContactExchangeRequest = z.infer<typeof contactExchangeRequestSchema>;
 
 export interface OkResponse {
   ok: true;
@@ -102,9 +106,18 @@ export interface GraphResponse {
     bio: string | null;
     photoUrl: string | null;
     metAt: string | null;
+    // Added Sep 26 (wave 3): the saved contact-exchange state with this person (moved here from the feedback
+    // screen). `peerPhone` is non-null only once both sides have agreed — computed server-side, never client-set.
+    contact: ContactState;
   }[];
   edges: { a: string; b: string }[];
   mutualEdges: { a: string; b: string }[];
+}
+
+export interface ContactState {
+  requested: boolean;
+  peerAccepted: boolean;
+  peerPhone: string | null;
 }
 
 export interface JoinEventResponse {
@@ -186,6 +199,9 @@ export interface GroupResponse {
   activity: Activity | null;
   // Christian (PR #22): 'generating' while the background plan runs; null when there's no activity row.
   activityStatus: ActivityStatus | null;
+  // Added Sep 26 (wave 3): every earlier plan for this group, newest first, excluding the current one. Each has
+  // `id` + `createdAt`; POST /groups/:id/activity/restore brings one back.
+  activityHistory: Activity[];
   // Set once the host (or any member) marks the hangout done. Chat and photos go read-only
   // 24h after this timestamp — see CreateEvent/Group screens.
   completedAt: string | null;
@@ -230,6 +246,7 @@ export interface IcebreakersResponse {
 
 export interface GenerateIcebreakersInput {
   name: string | null;
+  // Interests only (wave 3: 'avoid' tags are no longer mixed in).
   members: { displayName: string; interests: string[] }[];
 }
 
@@ -325,7 +342,9 @@ export interface FormGroupsOutput {
 }
 
 export interface GenerateActivityInput {
-  members: { displayName: string; interests: string[] }[];
+  // CHANGED Sep 26 (wave 3): `avoids` are the member's 'avoid' tags (e.g. "Alcohol"). They used to be folded
+  // into `interests`, which is how the planner ended up recommending pubs to people who'd opted out of alcohol.
+  members: { displayName: string; interests: string[]; avoids: string[] }[];
   constraints: {
     maxCostCents: number;
     maxTravelMi: number;
@@ -333,6 +352,8 @@ export interface GenerateActivityInput {
     lat: number;
     lng: number;
   };
+  // Added Sep 26 (wave 3): venues from earlier plans for this group, so "Suggest something else" is something else.
+  previousVenues: string[];
 }
 
 export type AnalyzeFeedbackOutput = z.infer<typeof analyzeFeedbackOutputSchema>;

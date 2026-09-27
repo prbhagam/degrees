@@ -42,6 +42,21 @@ export function memberDegreeStyle(
   return member.revealed ? MET : UNMET;
 }
 
+export function ordinalDegree(degree: number): string {
+  if (degree <= 0) return 'Degree 0';
+  const suffix = degree === 1 ? 'st' : degree === 2 ? 'nd' : degree === 3 ? 'rd' : 'th';
+  return `${degree}${suffix} degree`;
+}
+
+// Added Sep 26 (wave 3): the app speaks in degrees everywhere. You are degree 0; someone you've met is 1st degree;
+// a friend of a friend is 2nd; and so on. Redacted members still show their degree — that's the one thing the
+// design does let you know about someone you haven't met.
+export function memberDegreeLabel(member: Pick<GroupMember, 'degree' | 'revealed' | 'met'>): string {
+  if (member.degree === 0) return 'Degree 0 · you';
+  if (member.degree === 1 || member.met) return '1st degree · met in person';
+  return `${ordinalDegree(member.degree)} · not met yet`;
+}
+
 export function memberDisplayName(
   member: Pick<GroupMember, 'displayName' | 'revealed'>,
 ): string {

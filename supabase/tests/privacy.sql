@@ -34,3 +34,25 @@ begin
   perform id, display_name, bio from public.profiles limit 1;
 end $$;
 reset role;
+
+-- Wave 3 (0010): connection_contacts has zero client grants; activities.created_at exists; membership is in Realtime.
+do $$
+begin
+  if has_table_privilege('authenticated', 'public.connection_contacts', 'select')
+     or has_table_privilege('anon', 'public.connection_contacts', 'select') then
+    raise exception 'connection_contacts must not be client-readable';
+  end if;
+  if not exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'activities' and column_name = 'created_at'
+  ) then
+    raise exception 'activities.created_at missing (0010)';
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename in ('group_members', 'groups')
+    having count(*) = 2
+  ) then
+    raise exception 'group_members and groups must be in supabase_realtime (0010)';
+  end if;
+end $$;

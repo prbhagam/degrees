@@ -1,12 +1,17 @@
 // Owner: Pranav (Groups, Activities & Chat) — see docs/ROLES.md.
+// CHANGED Sep 26 (wave 3): plans are kept. Earlier plans list under the current one (GroupResponse.activityHistory)
+// with "Use this plan" to bring one back, and "Suggest something else" tells the planner which venues it already
+// suggested, so it stops returning the same place.
 import type { Activity } from '@degrees/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { format, parseISO } from 'date-fns';
 import * as Linking from 'expo-linking';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import {
   CalendarClock,
   DollarSign,
   ExternalLink,
+  History,
   Navigation,
   RefreshCw,
   Sparkles,
@@ -95,6 +100,9 @@ function ActivityDetails({ activity }: { activity: Activity }) {
         <Text className="font-display text-2xl text-ink">{activity.title}</Text>
         <Text className="font-body-medium text-base text-ink">{activity.venue}</Text>
         <Muted>{activity.address}</Muted>
+        {activity.createdAt ? (
+          <Muted>Suggested {format(parseISO(activity.createdAt), 'EEE, MMM d · h:mm a')}</Muted>
+        ) : null}
       </View>
 
       <Card>
@@ -132,31 +140,66 @@ function ActivityDetails({ activity }: { activity: Activity }) {
   );
 }
 
+function PreviousPlan({
+  activity,
+  onRestore,
+  restoring,
+}: {
+  activity: Activity;
+  onRestore: () => void;
+  restoring: boolean;
+}) {
+  return (
+    <Card>
+      <View className="flex-row items-start justify-between gap-3">
+        <View className="flex-1 gap-0.5">
+          <Text className="font-body-semibold text-base text-ink">{activity.title}</Text>
+          <Muted>
+            {activity.venue} · {formatPrice(activity.priceCents)}
+          </Muted>
+          {activity.createdAt ? (
+            <Muted>{format(parseISO(activity.createdAt), 'EEE, MMM d · h:mm a')}</Muted>
+          ) : null}
+        </View>
+        <Button label="Use this plan" variant="secondary" className="min-h-9 py-1.5" loading={restoring} onPress={onRestore} />
+      </View>
+      <Muted numberOfLines={2}>{activity.reasoning}</Muted>
+    </Card>
+  );
+}
+
 export function ActivityScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const queryClient = useQueryClient();
   const group = useGroup(id);
 
+  const applyPlan = (activity: Activity) => {
+    // The response is the saved plan, so the group view can show it without a refetch.
+    queryClient.setQueryData(
+      queryKeys.group(id),
+      (previous: typeof group.data) =>
+        previous
+          ? {
+              ...previous,
+              activity,
+              activityStatus: activity.status ?? 'ready',
+            }
+          : previous,
+    );
+    void queryClient.invalidateQueries({ queryKey: queryKeys.group(id) });
+  };
+
   const generate = useMutation({
     mutationFn: () => api.generateActivity(id),
-    onSuccess: (activity) => {
-      // The response is the saved plan, so the group view can show it without a refetch.
-      queryClient.setQueryData(
-        queryKeys.group(id),
-        (previous: typeof group.data) =>
-          previous
-            ? {
-                ...previous,
-                activity,
-                activityStatus: activity.status ?? 'generating',
-              }
-            : previous,
-      );
-      void queryClient.invalidateQueries({ queryKey: queryKeys.group(id) });
-    },
+    onSuccess: (activity) => applyPlan({ ...activity, status: activity.status ?? 'generating' }),
+  });
+  const restore = useMutation({
+    mutationFn: (activityId: string) => api.restoreActivity(id, activityId),
+    onSuccess: applyPlan,
   });
 
   const activity = group.data?.activity ?? null;
+  const history = group.data?.activityHistory ?? [];
   const jobRunning = activity?.status === 'generating' || group.data?.activityStatus === 'generating';
   const isGenerating = generate.isPending || jobRunning;
   // Wave 2: the server only starts the job; this hook advances it stage by stage (see useActivityJob).
@@ -181,7 +224,7 @@ export function ActivityScreen() {
           <Heading>Finding the best spot…</Heading>
           <Body className="text-center">
             Degrees AI is curating a real hangout plan with Google Maps based on
-            group interests, location, and budgets.
+            group interests, location, budgets, and what everyone would rather skip.
           </Body>
           {job.stalled ? (
             <>
@@ -197,13 +240,14 @@ export function ActivityScreen() {
       {generate.isError ? (
         <ErrorState message={generate.error.message} />
       ) : null}
+      {restore.isError ? <ErrorState message={restore.error.message} /> : null}
 
       {group.data && !activity && !isGenerating ? (
         <Card className="items-center py-8">
           <Sparkles size={28} color="#5B7A6B" />
           <Body className="text-center">
             No plan yet. Degrees will pick one real place near everyone that
-            fits the group’s budget.
+            fits the group's budget — and skips anything someone here opted out of.
           </Body>
           <Button label="Plan something" onPress={() => generate.mutate()} />
         </Card>
@@ -219,6 +263,24 @@ export function ActivityScreen() {
             onPress={() => generate.mutate()}
           />
         </>
+      ) : null}
+
+      {history.length > 0 ? (
+        <View className="gap-3 pt-2">
+          <View className="flex-row items-center gap-2">
+            <History size={16} color="#8A8378" />
+            <Heading>Earlier plans</Heading>
+          </View>
+          <Muted>Everything suggested for this group so far. New suggestions won't repeat these venues.</Muted>
+          {history.map((previous) => (
+            <PreviousPlan
+              key={previous.id ?? `${previous.venue}-${previous.createdAt}`}
+              activity={previous}
+              restoring={restore.isPending && restore.variables === previous.id}
+              onRestore={() => previous.id && restore.mutate(previous.id)}
+            />
+          ))}
+        </View>
       ) : null}
     </Screen>
   );

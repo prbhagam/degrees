@@ -4,6 +4,7 @@ import {
   addPhotoRequestSchema,
   exchangeRequestSchema,
   respondRequestSchema,
+  restoreActivityRequestSchema,
   type Activity,
   type ExchangeResponse,
   type GenerateActivityInput,
@@ -31,6 +32,7 @@ import {
   loadGroup,
   meetupForGroup,
   memberRows,
+  restoreActivity,
   saveActivity,
   saveIcebreakers,
   setActivityGenerating,
@@ -58,6 +60,7 @@ const mockActivityInput = {
   members: people.slice(0, 4).map(({ displayName, interests }) => ({
     displayName,
     interests: [...interests],
+    avoids: [],
   })),
   constraints: {
     maxCostCents: 3500,
@@ -66,10 +69,23 @@ const mockActivityInput = {
     lat: 33.7756,
     lng: -84.3963,
   },
+  previousVenues: [],
 } satisfies GenerateActivityInput;
 
-// Mock mode keeps the latest generated plan in memory so GET reflects POST.
+// Mock mode keeps the latest generated plan in memory so GET reflects POST. Wave 3: earlier plans are kept too.
 let mockActivity: Activity | null = groupFixture.activity;
+let mockActivityHistory: Activity[] = [...groupFixture.activityHistory];
+let mockActivitySerial = 0;
+function mockPlan(activity: Activity): Activity {
+  mockActivitySerial += 1;
+  return { ...activity, id: `mock-activity-${mockActivitySerial}`, createdAt: new Date().toISOString() };
+}
+function mockReplaceActivity(next: Activity): void {
+  if (mockActivity && mockActivity.status !== 'generating') {
+    mockActivityHistory = [mockActivity, ...mockActivityHistory];
+  }
+  mockActivity = mockPlan(next);
+}
 let mockCompletedAt: string | null = null;
 let mockStatus: GroupResponse['status'] = groupFixture.status;
 const mockPhotos: Photo[] = [];
@@ -146,6 +162,7 @@ export const groupRoutes = new Hono<AppEnv>()
         status: mockStatus,
         activity: mockActivity,
         activityStatus: mockActivity ? 'ready' : null,
+        activityHistory: mockActivityHistory,
         completedAt: mockCompletedAt,
         icebreakers: mockIcebreakers,
       } satisfies GroupResponse;
@@ -240,8 +257,8 @@ export const groupRoutes = new Hono<AppEnv>()
     const userId = context.get('userId');
     if (env.mockMode) {
       assertMockGroup(groupId);
-      mockActivity = await generateActivity(mockActivityInput);
-      const response: Activity = mockActivity;
+      mockReplaceActivity(await generateActivity(mockActivityInput));
+      const response: Activity = mockActivity!;
       return context.json(response);
     }
     await memberRows(groupId, userId);
@@ -307,6 +324,27 @@ export const groupRoutes = new Hono<AppEnv>()
     const { lockedUntil: _unlocked, ...next } = result.job;
     await updateActivityJob(current.id, { job: next });
     const response = { status: 'generating', stage: next.stage, activity: null } satisfies ActivityJobResponse;
+    return context.json(response);
+  })
+  // Added Sep 26 (wave 3): bring back an earlier plan from GroupResponse.activityHistory.
+  .post('/groups/:id/activity/restore', async (context) => {
+    const groupId = context.req.param('id');
+    const userId = context.get('userId');
+    const { activityId } = await validateJson(context, restoreActivityRequestSchema);
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      const previous = mockActivityHistory.find((plan) => plan.id === activityId);
+      if (!previous) {
+        throw new ApiError(404, 'activity_not_found', 'That plan is no longer available.');
+      }
+      mockReplaceActivity(previous);
+      const response: Activity = mockActivity!;
+      return context.json(response);
+    }
+    await memberRows(groupId, userId);
+    const activity = await restoreActivity(groupId, activityId);
+    log.info('activity.restored', { groupId, userId, activityId });
+    const response: Activity = activity;
     return context.json(response);
   })
   .post('/groups/:id/complete', async (context) => {

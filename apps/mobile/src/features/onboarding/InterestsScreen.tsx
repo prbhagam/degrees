@@ -10,12 +10,7 @@ import { Body, Button, Chip, ErrorState, Field, Muted, Screen } from '@/componen
 import { queryKeys, useMe } from '@/features/groups/queries';
 import { api } from '@/lib/api';
 import { useOnboardingFlow } from './flow';
-
-const COMMON_INTERESTS = [
-  'Hiking', 'Board Games', 'Live Music', 'Cooking', 'Climbing', 'Basketball',
-  'Photography', 'Trivia Night', 'Thrifting', 'Running', 'Karaoke', 'Film Club',
-  'Coffee Crawls', 'Pickup Soccer',
-];
+import { COMMON_INTERESTS } from './options';
 
 export function InterestsScreen() {
   const flow = useOnboardingFlow('interests');
@@ -88,7 +83,9 @@ export function InterestsScreen() {
       <Stack.Screen options={{ title: 'Interests', headerBackButtonDisplayMode: 'minimal' }} />
       <Muted>Step 1 of 3</Muted>
       <Text className="mt-2 font-display text-2xl text-ink">What are you into?</Text>
-      <Body className="mt-1 text-muted">Pick a few, or add your own below.</Body>
+      <Body className="mt-1 text-muted">
+        Pick a few, or add your own. This is what Degrees matches on when it reaches past your 1st degree.
+      </Body>
 
       <View className="mt-4 flex-row items-stretch gap-2">
         <View className="flex-1">

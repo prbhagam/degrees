@@ -48,7 +48,7 @@ export function ConnectScreen() {
             <Text className="font-display text-xl text-ink">{name}</Text>
             <Muted>At {activeEvent.name}</Muted>
             <Body className="text-center">
-              Just met someone here? Have them scan this. You'll both show up as "met in person."
+              Just met someone here? Have them scan this. You become each other's 1st degree.
             </Body>
           </Card>
           <Button

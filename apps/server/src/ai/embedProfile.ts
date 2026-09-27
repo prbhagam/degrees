@@ -13,12 +13,16 @@ interface EmbeddableProfile {
 // Interests lead because they're what matching is about. Name and city are left out on purpose: a name says nothing
 // about interests, everyone shares a city (distance is filtered separately), and shared boilerplate only pushes
 // every pair's similarity toward the same value.
+// CHANGED Sep 26 (wave 3): 'avoid' tags get their own line. They used to be embedded under "Interests:", so
+// someone who opted out of alcohol was embedded as if into it.
 export function buildProfileEmbeddingText(
   profile: EmbeddableProfile,
   tags: string[],
+  avoids: string[] = [],
 ): string {
   return [
     tags.length > 0 ? `Interests: ${tags.join(', ')}` : '',
+    avoids.length > 0 ? `Prefers to skip: ${avoids.join(', ')}` : '',
     profile.bio ? `About: ${profile.bio}` : '',
     profile.ai_paragraph ? `In their words: ${profile.ai_paragraph}` : '',
   ]
@@ -38,7 +42,7 @@ export async function embedProfileStrict(
       .select('bio, ai_paragraph')
       .eq('id', userId)
       .single(),
-    supabase.from('profile_tags').select('label').eq('user_id', userId),
+    supabase.from('profile_tags').select('label, kind').eq('user_id', userId),
   ]);
 
   if (profileResult.error || !profileResult.data) {
@@ -50,10 +54,12 @@ export async function embedProfileStrict(
     throw new Error(`Failed to fetch tags: ${tagsResult.error.message}`);
   }
 
-  const tags = [...new Set(tagsResult.data.map((t) => t.label as string))];
+  const tags = [...new Set(tagsResult.data.filter((t) => t.kind !== 'avoid').map((t) => t.label as string))];
+  const avoids = [...new Set(tagsResult.data.filter((t) => t.kind === 'avoid').map((t) => t.label as string))];
   const contentToEmbed = buildProfileEmbeddingText(
     profileResult.data as EmbeddableProfile,
     tags,
+    avoids,
   );
   if (!contentToEmbed) {
     throw new Error('Profile has nothing to embed yet.');

@@ -1,4 +1,6 @@
 // Owner: Charles (Onboarding & Profile) — see docs/ROLES.md.
+// CHANGED Sep 26 (wave 3): works for meetups as well as matched groups, and contact exchange moved out to
+// 1st-degree friends (Your Circle), where it's saved — this screen only collects the signal.
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -16,56 +18,11 @@ const RELATIONSHIP_OPTIONS: { value: FeedbackRelationship; label: string }[] = [
   { value: 'not_for_me', label: 'Not for me' },
 ];
 
-function ExchangeRow({ groupId, peerId, peerName }: { groupId: string; peerId: string; peerName: string }) {
-  const [state, setState] = useState<'none' | 'pending' | 'exchanged'>('none');
-  const [phone, setPhone] = useState<string | null>(null);
-
-  const ask = useMutation({
-    mutationFn: () => api.requestExchange(groupId, peerId),
-    onSuccess: (result) => {
-      if (result.peerPhone) {
-        setState('exchanged');
-        setPhone(result.peerPhone);
-      } else {
-        setState('pending');
-      }
-    },
-  });
-  const accept = useMutation({
-    mutationFn: () => api.acceptExchange(groupId, peerId),
-    onSuccess: (result) => {
-      setState('exchanged');
-      setPhone(result.peerPhone);
-    },
-  });
-
-  if (state === 'none') {
-    return (
-      <Button label="Ask to exchange contact info" variant="ghost" className="mt-2.5" onPress={() => ask.mutate()} loading={ask.isPending} />
-    );
-  }
-  if (state === 'pending') {
-    return (
-      <View className="mt-2.5 flex-row items-center justify-between">
-        <Muted>Waiting on {peerName} to agree too…</Muted>
-        <Pressable onPress={() => accept.mutate()}>
-          <Text className="font-body-semibold text-xs text-ember-ink underline">(demo: they said yes)</Text>
-        </Pressable>
-      </View>
-    );
-  }
-  return (
-    <View className="mt-2.5 border-t border-line pt-2.5">
-      <Text className="font-body-semibold text-xs text-sage">Numbers exchanged</Text>
-      <Muted className="mt-0.5">{peerName}: {phone} — you're both off-app now.</Muted>
-    </View>
-  );
-}
-
 export function FeedbackScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const group = useGroup(id);
+  const isMeetup = group.data?.kind === 'meetup';
 
   const [rating, setRating] = useState(0);
   const [tags, setTags] = useState<string[]>([]);
@@ -113,7 +70,7 @@ export function FeedbackScreen() {
           <Text className="font-display text-2xl text-ink">Thanks!</Text>
           <Body className="text-center text-muted">
             This helps us plan your next hangout — and figure out who you'd like to keep hanging out
-            with.
+            with. Want their number? That happens from your 1st-degree friends.
           </Body>
           <Button label="Back to group" variant="secondary" className="mt-4" onPress={() => router.back()} />
         </View>
@@ -127,7 +84,7 @@ export function FeedbackScreen() {
 
       <View>
         <Text className="font-body-semibold text-xs uppercase tracking-wider text-muted">
-          How was the group overall?
+          {isMeetup ? 'How was the meetup overall?' : 'How was the group overall?'}
         </Text>
         <View className="mt-2.5 flex-row gap-2">
           {[1, 2, 3, 4, 5].map((n) => (
@@ -173,7 +130,6 @@ export function FeedbackScreen() {
                     />
                   ))}
                 </View>
-                <ExchangeRow groupId={id!} peerId={member.id!} peerName={member.displayName!} />
               </Card>
             ))}
           </View>

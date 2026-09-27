@@ -35,7 +35,7 @@ export const persistOptions = {
   persister: queryPersister,
   maxAge: CACHE_MAX_AGE_MS,
   // Bump when a cached shape changes incompatibly so old entries are discarded, not rendered.
-  buster: 'wave2',
+  buster: 'wave3',
 };
 
 // React Native has no window focus events; map the app coming to the foreground onto TanStack's focus manager so

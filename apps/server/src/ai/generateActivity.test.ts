@@ -4,11 +4,19 @@
 import assert from 'node:assert/strict';
 import type { GenerateActivityInput } from '@degrees/shared';
 import { activityFixture } from '../mocks/fixtures.js';
-import { activityJobSchema, newActivityJob, runActivityStage } from './generateActivity.js';
+import {
+  activityJobSchema,
+  avoidRules,
+  isPreviousVenue,
+  newActivityJob,
+  runActivityStage,
+  violatesAvoids,
+} from './generateActivity.js';
 
 const input: GenerateActivityInput = {
-  members: [{ displayName: 'Avery', interests: ['bouldering'] }],
+  members: [{ displayName: 'Avery', interests: ['bouldering'], avoids: [] }],
   constraints: { maxCostCents: 3000, maxTravelMi: 10, city: 'Atlanta', lat: 33.7756, lng: -84.3963 },
+  previousVenues: [],
 };
 
 let failures = 0;
@@ -65,6 +73,45 @@ await test('a stage never throws, and errors are capped at eight', async () => {
   assert.match(result.job.errors[7] ?? '', /^places: /);
   const done = await runActivityStage({ ...base, stage: 'fixture' }, input, 2000);
   assert.ok(done.activity);
+});
+
+// Wave 3: 'avoid' tags are hard rules for the planner, and earlier venues are never suggested twice.
+await test('avoidRules turns every member\'s avoid tags into one de-duplicated rule list', async () => {
+  const group: GenerateActivityInput = {
+    ...input,
+    members: [
+      { displayName: 'Avery', interests: ['bouldering'], avoids: ['Alcohol', 'Late nights'] },
+      { displayName: 'Maya', interests: ['coffee'], avoids: ['alcohol', 'Ferris wheels'] },
+    ],
+  };
+  const rules = avoidRules(group);
+  assert.equal(rules.length, 3);
+  assert.match(rules[0] ?? '', /no bars, pubs, breweries/);
+  assert.match(rules[1] ?? '', /8pm/);
+  assert.equal(rules[2], 'no ferris wheels');
+  assert.deepEqual(avoidRules(input), []);
+});
+
+await test('violatesAvoids flags alcohol-centred venues only when someone avoids alcohol', async () => {
+  const dry: GenerateActivityInput = {
+    ...input,
+    members: [{ displayName: 'Avery', interests: [], avoids: ['Alcohol'] }],
+  };
+  assert.ok(violatesAvoids('The Local Pub', dry));
+  assert.ok(violatesAvoids('Monday Night Brewing taproom', dry));
+  assert.ok(violatesAvoids('Trivia at Ormsby\'s Bar', dry));
+  assert.equal(violatesAvoids('Stone Summit Midtown', dry), null);
+  assert.equal(violatesAvoids('The Painted Duck', dry), null);
+  // Nobody avoiding alcohol: a pub is fine.
+  assert.equal(violatesAvoids('The Local Pub', input), null);
+});
+
+await test('isPreviousVenue matches loosely against the venues already suggested', async () => {
+  const seen: GenerateActivityInput = { ...input, previousVenues: ['Your 3rd Spot - Westside', 'The Painted Duck'] };
+  assert.ok(isPreviousVenue('Your 3rd Spot', seen));
+  assert.ok(isPreviousVenue('the painted duck', seen));
+  assert.equal(isPreviousVenue('Stone Summit Midtown', seen), false);
+  assert.equal(isPreviousVenue('', seen), false);
 });
 
 console.warn = silence;

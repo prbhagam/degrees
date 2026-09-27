@@ -2,7 +2,7 @@
 // CHANGED Sep 26 (wave 2): "Host a meetup". Collects when it happens (the join code expires 24h after that
 // time, or after creation if unscheduled), then opens the meetup's group screen, which has the code + QR,
 // the lobby, icebreakers, chat, plan, and photos. No separate lobby screen.
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import DateTimePicker, { type DateTimePickerChangeEvent } from '@react-native-community/datetimepicker';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { addMinutes, format } from 'date-fns';
 import { Stack, useRouter } from 'expo-router';
@@ -52,8 +52,9 @@ export function CreateEventScreen() {
     },
   });
 
-  const onPick = (_event: DateTimePickerEvent, date?: Date) => {
-    if (date) setScheduledAt(date);
+  // datetimepicker 9: onChange is deprecated in favour of onValueChange (a date, always) + onDismiss.
+  const onPick = (_event: DateTimePickerChangeEvent, date: Date) => {
+    setScheduledAt(date);
   };
 
   return (
@@ -62,7 +63,7 @@ export function CreateEventScreen() {
       <Text className="font-display text-2xl text-ink">Host a meetup</Text>
       <Muted className="mt-1.5">
         You'll get a code. Anyone who scans or types it in person joins — and when you end the meetup,
-        everyone who came is connected.
+        everyone who came becomes each other's 1st degree.
       </Muted>
 
       <View className="mt-5 gap-4">
@@ -111,7 +112,8 @@ export function CreateEventScreen() {
                 display="spinner"
                 minuteInterval={5}
                 minimumDate={new Date()}
-                onChange={onPick}
+                onValueChange={onPick}
+                onDismiss={() => setShowPicker(false)}
               />
             </View>
           ) : null}

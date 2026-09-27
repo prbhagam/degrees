@@ -22,8 +22,9 @@ const AUTH_SCREENS = new Set(['login', 'signup']);
 export function consumePendingHref(): Href {
   const { pendingHref, setPendingHref } = useSessionStore.getState();
   setPendingHref(null);
-  // '/index' (not '/'): Christian's convention from PR #22 for the tabs home route.
-  return pendingHref ?? '/index';
+  // '/' is the tabs home route. Wave 3: this was '/index', which isn't a route the router knows (see
+  // .expo/types/router.d.ts) — every path that landed here from inside the app hit "Unmatched Route".
+  return pendingHref ?? '/';
 }
 
 // Added Sep 26 (wave 2): entering the app proper from login/signup/onboarding. Those screens are pushed on top of

@@ -39,6 +39,8 @@ export function useMe() {
 
 // `live` (wave 2): one-minute polling while the screen is focused. While a plan is generating (Christian, PR #22)
 // it polls every 2s and also subscribes to `activities` so the 'ready' row lands the moment it's written.
+// Wave 3: the same channel also watches `group_members` (someone joins or leaves) and the `groups` row itself
+// (ended, confirmed), so everyone already in a meetup sees a new arrival without pulling to refresh.
 export function useGroup(id: string | undefined, { live = false }: { live?: boolean } = {}) {
   const queryClient = useQueryClient();
   // supabase-js caches channels by topic: a second screen calling this hook for the same group would get the
@@ -57,23 +59,42 @@ export function useGroup(id: string | undefined, { live = false }: { live?: bool
       // Same fix as chat: the socket must carry the JWT or RLS evaluates as anon and nothing is delivered.
       await supabase.realtime.setAuth(session.access_token);
       if (cancelled) return;
+      const topic = `group-live:${id}:${instance.current}`;
+      // Belt and braces for the "cannot add postgres_changes callbacks after subscribe()" crash: supabase-js hands
+      // back an existing channel for a repeated topic, so drop any leftover with this topic before building ours.
+      for (const existing of supabase.getChannels()) {
+        if (existing.topic === `realtime:${topic}`) await supabase.removeChannel(existing);
+      }
+      if (cancelled) return;
+      const refresh = () => {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.group(id) });
+      };
       const channel = supabase
-        .channel(`group-activity-sub:${id}:${instance.current}`)
+        .channel(topic)
         .on(
           'postgres_changes',
-          {
-            event: '*',
-            schema: 'public',
-            table: 'activities',
-            filter: `group_id=eq.${id}`,
-          },
+          { event: '*', schema: 'public', table: 'activities', filter: `group_id=eq.${id}` },
+          refresh,
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'group_members', filter: `group_id=eq.${id}` },
           () => {
-            void queryClient.invalidateQueries({
-              queryKey: queryKeys.group(id),
-            });
+            refresh();
+            void queryClient.invalidateQueries({ queryKey: queryKeys.hangouts });
           },
         )
-        .subscribe();
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'groups', filter: `id=eq.${id}` },
+          () => {
+            refresh();
+            void queryClient.invalidateQueries({ queryKey: queryKeys.hangouts });
+          },
+        )
+        .subscribe((status, error) => {
+          if (__DEV__ && error) console.warn(`[group] realtime ${status}: ${error.message}`);
+        });
 
       cleanup = () => {
         void supabase.removeChannel(channel);

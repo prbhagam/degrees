@@ -18,6 +18,7 @@ import {
 import { getServiceClient } from '../db/supabase.js';
 import { ApiError } from './errors.js';
 import { exploreFrom, profileBasics } from './graph.js';
+import { log } from './log.js';
 
 // Added Sep 26 (wave 2): a meetup's room-code record (the `events` row behind a kind='meetup' group).
 export interface MeetupRow {
@@ -163,7 +164,7 @@ export async function icebreakersInput(groupId: string, viewerId: string): Promi
     name: (group.data.name as string | null) ?? null,
     members: ids.map((id) => ({
       displayName: basics.get(id)?.displayName ?? 'Someone',
-      interests: tags.get(id) ?? [],
+      interests: tags.get(id)?.interests ?? [],
     })),
   };
 }
@@ -189,24 +190,36 @@ export async function assertNotArchived(groupId: string): Promise<void> {
   }
 }
 
-async function tagsByUser(ids: string[]): Promise<Map<string, string[]>> {
+export interface UserTags {
+  // hobby / activity / derived
+  interests: string[];
+  // 'avoid' tags: things the person opted out of ("Alcohol", "Late nights"). A constraint, never an interest.
+  avoids: string[];
+}
+
+// CHANGED Sep 26 (wave 3): split by kind. Every consumer used to get one flat label list, so "Alcohol" chosen under
+// "Anything you'd rather skip?" reached Gemini as an interest — the planner recommended pubs to people avoiding
+// alcohol, and icebreakers asked about it.
+async function tagsByUser(ids: string[]): Promise<Map<string, UserTags>> {
   const { data, error } = await getServiceClient()
     .from('profile_tags')
-    .select('user_id, label')
+    .select('user_id, label, kind')
     .in('user_id', ids);
   if (error) {
     throw new Error(`profile_tags read failed: ${error.message}`);
   }
-  const tags = new Map<string, string[]>();
+  const tags = new Map<string, UserTags>();
   for (const row of data) {
-    const list = tags.get(row.user_id as string) ?? [];
-    list.push(row.label as string);
-    tags.set(row.user_id as string, list);
+    const entry = tags.get(row.user_id as string) ?? { interests: [], avoids: [] };
+    (row.kind === 'avoid' ? entry.avoids : entry.interests).push(row.label as string);
+    tags.set(row.user_id as string, entry);
   }
   return tags;
 }
 
 interface ActivityRow {
+  id?: string;
+  created_at?: string | null;
   title: string | null;
   venue: string | null;
   address: string | null;
@@ -222,6 +235,8 @@ interface ActivityRow {
 
 function toActivity(row: ActivityRow): Activity | null {
   const parsed = activitySchema.safeParse({
+    id: row.id,
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : undefined,
     title: row.title ?? '',
     venue: row.venue ?? '',
     address: row.address ?? '',
@@ -260,7 +275,8 @@ export async function loadGroup(
         .select('id, status, reasoning, completed_at, kind, name, created_by, scheduled_at')
         .eq('id', groupId)
         .single(),
-      db.from('activities').select('*').eq('group_id', groupId).limit(1),
+      // Wave 3: every plan is kept; the newest row is the current one and the rest are history.
+      db.from('activities').select('*').eq('group_id', groupId).order('created_at', { ascending: false }),
       profileBasics(ids),
       tagsByUser(ids),
       exploreFrom(viewerId, undefined, ids),
@@ -277,7 +293,7 @@ export async function loadGroup(
   const status = (groupResult.data.status as GroupStatus | null) ?? 'proposed';
   const kind = (groupResult.data.kind as HangoutKind | null) ?? 'matched';
   const viewerTags = new Set(
-    (tags.get(viewerId) ?? []).map((label) => label.toLowerCase()),
+    (tags.get(viewerId)?.interests ?? []).map((label) => label.toLowerCase()),
   );
   // CHANGED Sep 26: members past 1st degree are redacted — no id, no displayName, bio, or photo.
   // The design goal is that you never browse the wider matching pool's identities. But accepting
@@ -297,7 +313,7 @@ export async function loadGroup(
     const sharedInterests =
       id === viewerId
         ? []
-        : (tags.get(id) ?? []).filter((label) =>
+        : (tags.get(id)?.interests ?? []).filter((label) =>
             viewerTags.has(label.toLowerCase()),
           );
     const profile = basics.get(id);
@@ -326,12 +342,20 @@ export async function loadGroup(
   members.sort((a, b) => a.degree - b.degree);
   const unrevealedCount = members.filter((member) => !member.revealed).length;
 
-  const activityRow = activityResult.data[0] as ActivityRow | undefined;
+  const activityRows = activityResult.data as ActivityRow[];
+  const activityRow = activityRows[0];
   const codeOpen = meetup ? isCodeOpen(meetup) : false;
   // Christian (PR #22): a row with status 'generating' is the placeholder written by POST /activity while the
   // background function works; the client polls/subscribes until it flips to 'ready'.
   const activityStatus = (activityRow?.status as ActivityStatus | null) ?? (activityRow ? 'ready' : null);
   const activity = activityRow ? toActivity(activityRow) : null;
+  const activityHistory = activityRows
+    .slice(1)
+    .filter((row) => (row.status ?? 'ready') === 'ready')
+    .flatMap((row) => {
+      const parsed = toActivity(row);
+      return parsed ? [parsed] : [];
+    });
   return {
     id: groupResult.data.id as string,
     status,
@@ -340,6 +364,7 @@ export async function loadGroup(
     unrevealedCount,
     activity,
     activityStatus,
+    activityHistory,
     completedAt: iso(groupResult.data.completed_at as string | null),
     kind,
     name: (groupResult.data.name as string | null) ?? meetup?.name ?? null,
@@ -355,6 +380,13 @@ export async function loadGroup(
 // Added Sep 26 (wave 2): leave any group you're in that hasn't wrapped up. Proposed: same as declining.
 // Confirmed group or live meetup: you drop out; the others keep it. Completed: it's history (feedback, photos,
 // the edges it formed), so it can't be left.
+//
+// CHANGED Sep 26 (wave 3, Sahith's call from testing): leaving a live meetup undoes ONLY the connections that
+// meetup created for you — the `connections` rows carrying its `event_id` (ending the meetup, a lobby "We met",
+// or a QR scan while it was the active event all write that id). A connection you already had with someone
+// before — from an earlier hangout, a QR scan elsewhere, or the seed — carries a different (or no) event id and is
+// never touched: `POST /connections` and the end-of-meetup upsert both keep the original row on conflict, so an
+// edge's event_id always records where it was FIRST made. Nothing else about the person changes.
 export async function leaveGroup(groupId: string, userId: string): Promise<void> {
   await memberRows(groupId, userId);
   const { status } = await groupState(groupId);
@@ -366,9 +398,9 @@ export async function leaveGroup(groupId: string, userId: string): Promise<void>
   if (error) {
     throw new Error(`group_members delete failed: ${error.message}`);
   }
-  // Keep the legacy attendee list in step for meetups (seed/tests still read it).
   const meetup = await meetupForGroup(groupId);
   if (meetup) {
+    // Keep the legacy attendee list in step (seed/tests still read it).
     const { error: attendeeError } = await db
       .from('event_attendees')
       .delete()
@@ -377,6 +409,17 @@ export async function leaveGroup(groupId: string, userId: string): Promise<void>
     if (attendeeError) {
       throw new Error(`event_attendees delete failed: ${attendeeError.message}`);
     }
+    // Only this meetup's edges, only the leaver's. `event_id` scoping is what protects pre-existing connections.
+    const { data: cut, error: cutError } = await db
+      .from('connections')
+      .delete()
+      .eq('event_id', meetup.id)
+      .or(`user_a.eq.${userId},user_b.eq.${userId}`)
+      .select('user_a, user_b');
+    if (cutError) {
+      throw new Error(`connections delete failed: ${cutError.message}`);
+    }
+    log.info('groups.left_meetup', { userId, groupId, eventId: meetup.id, connectionsCut: cut?.length ?? 0 });
   }
 }
 
@@ -387,7 +430,7 @@ export async function activityInput(
 ): Promise<GenerateActivityInput> {
   const ids = (await memberRows(groupId, viewerId)).map((row) => row.user_id);
   const db = getServiceClient();
-  const [profiles, prefs, tags] = await Promise.all([
+  const [profiles, prefs, tags, previous] = await Promise.all([
     db
       .from('profiles')
       .select('id, username, display_name, city, lat, lng')
@@ -397,6 +440,14 @@ export async function activityInput(
       .select('cost_max_cents, max_travel_mi')
       .in('user_id', ids),
     tagsByUser(ids),
+    // Wave 3: the venues already suggested for this group, so a regenerate doesn't hand back the same plan.
+    db
+      .from('activities')
+      .select('venue')
+      .eq('group_id', groupId)
+      .eq('status', 'ready')
+      .order('created_at', { ascending: false })
+      .limit(12),
   ]);
   if (profiles.error) {
     throw new Error(`profiles read failed: ${profiles.error.message}`);
@@ -404,6 +455,16 @@ export async function activityInput(
   if (prefs.error) {
     throw new Error(`preferences read failed: ${prefs.error.message}`);
   }
+  if (previous.error) {
+    throw new Error(`activities read failed: ${previous.error.message}`);
+  }
+  const previousVenues = [
+    ...new Set(
+      previous.data
+        .map((row) => (row.venue as string | null)?.trim() ?? '')
+        .filter((venue) => venue.length > 0),
+    ),
+  ];
 
   const located = profiles.data.filter(
     (row) => typeof row.lat === 'number' && typeof row.lng === 'number',
@@ -424,7 +485,8 @@ export async function activityInput(
     members: profiles.data.map((row) => ({
       displayName:
         (row.display_name as string | null) ?? (row.username as string),
-      interests: tags.get(row.id as string) ?? [],
+      interests: tags.get(row.id as string)?.interests ?? [],
+      avoids: tags.get(row.id as string)?.avoids ?? [],
     })),
     constraints: {
       maxCostCents: tightest(
@@ -445,11 +507,14 @@ export async function activityInput(
           ? average(located.map((row) => row.lng as number))
           : DEFAULT_CENTER.lng,
     },
+    previousVenues,
   };
 }
 
-// One plan per group: generating again replaces the previous one. `job` is the resumable stage state kept while
-// status is 'generating' (see ai/generateActivity.ts runActivityStage); null once the plan is ready.
+// CHANGED Sep 26 (wave 3): plans are kept. Saving removes only the group's placeholder rows ('generating' /
+// 'failed') and inserts the new row, which becomes the current plan by being newest; earlier 'ready' rows stay
+// as history. `job` is the resumable stage state kept while status is 'generating' (see ai/generateActivity.ts
+// runActivityStage); null once the plan is ready.
 export async function saveActivity(
   groupId: string,
   activity: Activity,
@@ -460,7 +525,8 @@ export async function saveActivity(
   const { error: deleteError } = await db
     .from('activities')
     .delete()
-    .eq('group_id', groupId);
+    .eq('group_id', groupId)
+    .in('status', ['generating', 'failed']);
   if (deleteError) {
     throw new Error(`activities delete failed: ${deleteError.message}`);
   }
@@ -498,6 +564,7 @@ export async function loadActivityJob(groupId: string): Promise<ActivityJobRow |
     .from('activities')
     .select('*')
     .eq('group_id', groupId)
+    .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
   if (error) {
@@ -545,4 +612,28 @@ export async function setActivityGenerating(groupId: string, job: ActivityJob = 
   };
   await saveActivity(groupId, placeholder, 'generating', job);
   return placeholder;
+}
+
+// Added Sep 26 (wave 3): make an earlier plan the current one again. It's copied as a new row (so the history
+// stays chronological and the copy gets today's timestamp) and any in-flight placeholder is dropped.
+export async function restoreActivity(groupId: string, activityId: string): Promise<Activity> {
+  const db = getServiceClient();
+  const { data, error } = await db
+    .from('activities')
+    .select('*')
+    .eq('group_id', groupId)
+    .eq('id', activityId)
+    .eq('status', 'ready')
+    .maybeSingle();
+  if (error) {
+    throw new Error(`activities read failed: ${error.message}`);
+  }
+  const previous = data ? toActivity(data as ActivityRow) : null;
+  if (!previous) {
+    throw new ApiError(404, 'activity_not_found', 'That plan is no longer available.');
+  }
+  const { id: _id, createdAt: _createdAt, ...plan } = previous;
+  await saveActivity(groupId, plan, 'ready', null);
+  const current = await loadActivityJob(groupId);
+  return current?.activity ?? plan;
 }

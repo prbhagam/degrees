@@ -11,14 +11,14 @@ The Degrees iOS app: **Expo SDK 57 · React Native 0.86 · Expo Router · Native
 ```
 src/app/                 Expo Router routes. Every file is a screen; _layout.tsx files are navigators.
   _layout.tsx            providers (TanStack Query) + root Stack. Rarely changes.
-  (tabs)/_layout.tsx     the bottom nav (Home · Circle · Profile) from the validated design     (Charles)
+  (tabs)/_layout.tsx     the bottom nav (Home · 1st degree · Degree 0) from the validated design     (Charles)
   (tabs)/index.tsx                         → features/home          (Pranav) your groups, find a group, meet someone, host/join
-  (tabs)/circle.tsx                        → features/circle        (Pranav) Your Circle: 1st-degree list + map
-  (tabs)/profile.tsx                       → features/profile       (Charles)
+  (tabs)/circle.tsx                        → features/circle        (Pranav) "1st-degree friends": list + map, and contact exchange (wave 3)
+  (tabs)/profile.tsx                       → features/profile       (Charles) "Degree 0 (You)"
   login.tsx signup.tsx                     → features/auth          (Charles)
   onboarding/{interests,about,preferences}.tsx → features/onboarding (Charles)
   profile/edit.tsx                         → features/profile       (Charles)
-  groups/[id]/feedback.tsx                 → features/feedback      (Charles) 3-way signal + contact exchange
+  groups/[id]/feedback.tsx                 → features/feedback      (Charles) 3-way signal, groups AND meetups (exchange moved to circle in wave 3)
   join/index.tsx  join/[roomCode].tsx      → features/events        (Pranav) room code entry · joins, then opens groups/[id] (wave 2)
   connect/index.tsx  connect/[peerId].tsx  → features/events        (Pranav) my QR (needs an active event) · deep-link target that forms an edge
   scan.tsx                                 → features/events        (Pranav) one scanner for event + person QR codes
@@ -26,9 +26,9 @@ src/app/                 Expo Router routes. Every file is a screen; _layout.tsx
   match.tsx                                → features/groups        (Pranav) runs matching, then opens the group
   groups/[id]/index.tsx                    → features/groups        (Pranav) one screen for matched groups AND meetups (wave 2): members + "We met",
                                                                      code/QR, icebreakers, accept/decline, end/complete, leave
-  groups/[id]/activity.tsx                 → features/activity      (Pranav)
+  groups/[id]/activity.tsx                 → features/activity      (Pranav) current plan + earlier plans with "Use this plan" (wave 3)
   groups/[id]/chat.tsx                     → features/chat          (Pranav) Realtime + 3s polling fallback
-  groups/[id]/photos.tsx                   → features/photos        (Pranav)
+  groups/[id]/photos.tsx                   → features/photos        (Pranav) grid → full-screen viewer (pinch zoom, save to camera roll; wave 3)
   notifications.tsx                        → features/notifications (Christian)
 src/features/<feature>/  the real screens, components, and hooks for that feature
 src/lib/api.ts           typed fetch wrapper for every API endpoint; attaches the Supabase JWT
@@ -38,6 +38,7 @@ src/lib/storage.ts       wave 2: the on-device key/value store behind the query 
 src/lib/upload.ts        wave 2: expo-image-picker + the ONLY direct Supabase writes (Storage: event-photos, avatars)
 src/stores/session.ts    Zustand: currentUser, activeGroupId, activeEvent (persisted), onboardingSkippedBy (persisted)
 src/features/onboarding/flow.ts  wave 2: next/skip/returnTo for the three onboarding steps
+src/features/onboarding/options.ts  wave 3: COMMON_INTERESTS + AVOID_OPTIONS, shared by onboarding and Edit profile
 src/components/ui.tsx    the app's one UI kit (validated design) — use it instead of new primitives
 ```
 
@@ -64,7 +65,9 @@ Deep links come free from the `degrees` scheme in `app.json`. For example, `degr
 - Direct Supabase **reads** are allowed only for what [API-CONTRACTS.md](../../docs/API-CONTRACTS.md) lists: your own profile and preferences, the members of your groups, chat messages via Realtime, and your own notifications. Never select `*` from `profiles` — signed-in clients can't read `lat`, `lng`, `phone`, `pronouns`, or `photo_url` (migrations 0005/0006), so a `*` select fails.
 - **Anyone past 1st degree is redacted by the server** (`revealed: false`, null id/name/bio/photo) until the group is confirmed. Render the redacted state; never try to recover identity another way.
 - Fetch through **TanStack Query** (`useQuery` / `useMutation` wrapping `api.*`). The server is the source of truth, so no optimistic local state. **Wave 2:** every list screen has a `RefreshControl`; screens showing live data pass `refetchInterval: LIVE_POLL_MS` (one minute, focused only); the cache is persisted to disk (`PersistQueryClientProvider`, cleared on sign-out) so `queryKeys` in `features/groups/queries.ts` are the shared key registry — bump `persistOptions.buster` when a cached shape changes.
-- **Realtime needs the JWT on the socket.** `useMessages` calls `supabase.realtime.setAuth(session.access_token)` before subscribing (verified against the shared project: without it the channel says SUBSCRIBED and delivers nothing). Do the same for any new subscription.
+- **Realtime needs the JWT on the socket.** `useMessages` calls `supabase.realtime.setAuth(session.access_token)` before subscribing (verified against the shared project: without it the channel says SUBSCRIBED and delivers nothing). Do the same for any new subscription. **One channel topic per hook instance** (a random suffix, see `useGroup`): supabase-js caches channels by topic and `.on()` on an already-subscribed channel throws "cannot add postgres_changes callbacks after subscribe()". `useGroup` (wave 3) watches `activities`, `group_members`, and the `groups` row on one channel.
+- **Home is `/`.** Never navigate to `'/index'` — it isn't a route the router knows and lands on "Unmatched Route" (wave 3 fix). From a pushed screen, go home with `router.dismissTo('/')`; from login/onboarding use `enterApp()`.
+- **Speak in degrees.** You are degree 0; people you've met are your 1st degree; friends of friends are 2nd. Screen titles, labels and copy use that vocabulary (`memberDegreeLabel` in `features/groups/degrees.ts`) — "Your circle" is "1st-degree friends", Profile is "Degree 0 (You)".
 - Types and Zod schemas come from `@degrees/shared`. Use the shared schemas for form validation, and don't redeclare shapes.
 
 ## Env and the API URL
@@ -116,11 +119,12 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 
 ---
 
-## Known gaps (Sep 26, after wave 2)
+## Known gaps (Sep 26, after wave 3)
 
 Tracked with owners in [docs/ROLES.md](../../docs/ROLES.md#next-steps-sep-26):
 - **Notifications** poll once a minute (no Realtime, no mark-read), and nothing writes rows yet.
-- **Feedback**: the "(demo: they said yes)" link only re-marks your own side, the peer has no UI to see an incoming exchange request, and the group-tag chips are never sent.
+- **Feedback**: the group-tag chips are never sent. (Contact exchange moved to 1st-degree friends in wave 3, with a real "wants your number" state for the peer; the fake "(demo: they said yes)" link is gone.)
+- **Photo save** uses `expo-media-library`, which Expo Go bundles; a dev build needs the plugin entry in `app.json` (added).
 - **About**: "Generate tags" is still canned (a real endpoint is Christian's); accepted tags now go out as `hobby`.
 - **Preferences** reach counts are hard-coded (values now prefill).
 - **Chat push while backgrounded** was deliberately not built (needs APNs + a dev build); in-app delivery is Realtime with a 30s safety poll.

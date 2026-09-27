@@ -193,4 +193,9 @@ export const api = {
     request<OkResponse>(`${groupPath(id)}/leave`, { method: 'POST' }),
   generateIcebreakers: (id: string) =>
     request<IcebreakersResponse>(`${groupPath(id)}/icebreakers`, { method: 'POST' }),
+  // Added Sep 26 (wave 3): plan history + contact exchange from Your Circle.
+  restoreActivity: (id: string, activityId: string) =>
+    request<Activity>(`${groupPath(id)}/activity/restore`, json('POST', { activityId })),
+  exchangeContact: (peerId: string) =>
+    request<ExchangeResponse>('/api/graph/exchange', json('POST', { peerId })),
 };
