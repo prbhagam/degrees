@@ -32,6 +32,7 @@ import {
   activityInput,
   assertNotArchived,
   chooseTime,
+  claimActivityStageLock,
   groupNotFound,
   groupState,
   icebreakersInput,
@@ -371,12 +372,24 @@ export const groupRoutes = new Hono<AppEnv>()
     // Claim the stage for this invocation. The lock outlives the stage budget slightly so a second poll that
     // arrives mid-stage waits for the next one instead of running the same call twice.
     const locked = { ...job, lockedUntil: new Date(now + STAGE_LOCK_MS).toISOString() };
-    await updateActivityJob(current.id, { job: locked });
+    const claimed = await claimActivityStageLock(current.id, locked);
+    if (!claimed) {
+      const response = { status: 'generating', stage: job.stage, activity: null } satisfies ActivityJobResponse;
+      return context.json(response);
+    }
 
     const input = await activityInput(groupId, userId);
     const result = await timed('ai.activity.stage', { groupId, stage: job.stage }, () =>
       runActivityStage(job, input, STAGE_BUDGET_MS),
+      (stageResult) => stageResult.failed === true,
     );
+    if (result.failed) {
+      const { lockedUntil: _unlocked, ...failedJob } = result.job;
+      await updateActivityJob(current.id, { job: failedJob, status: 'failed' });
+      log.warn('activity.job.failed', { groupId, userId, errors: result.job.errors });
+      const response = { status: 'failed', stage: null, activity: null } satisfies ActivityJobResponse;
+      return context.json(response);
+    }
     if (result.activity) {
       await saveActivity(groupId, result.activity, 'ready', null);
       log.info('activity.job.ready', { groupId, userId, source: result.activity.source, stages: result.job.errors.length + 1 });

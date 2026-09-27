@@ -204,10 +204,13 @@ export function ActivityScreen() {
     onSuccess: (activity, activityId) => applyPlan(activity, activityId),
   });
 
-  const activity = group.data?.activity ?? null;
+  const activity =
+    group.data?.activity && group.data.activity.status !== 'generating' ? group.data.activity : null;
   const history = group.data?.activityHistory ?? [];
-  const jobRunning = activity?.status === 'generating' || group.data?.activityStatus === 'generating';
+  const jobRunning =
+    group.data?.activity?.status === 'generating' || group.data?.activityStatus === 'generating';
   const isGenerating = generate.isPending || jobRunning;
+  const isFailed = group.data?.activityStatus === 'failed';
   // Wave 2: the server only starts the job; this hook advances it stage by stage (see useActivityJob).
   const job = useActivityJob(id, Boolean(jobRunning));
 
@@ -248,7 +251,21 @@ export function ActivityScreen() {
       ) : null}
       {restore.isError ? <ErrorState message={restore.error.message} /> : null}
 
-      {group.data && !activity && !isGenerating ? (
+      {isFailed && !isGenerating && !activity ? (
+        <Card className="items-center gap-3 border-line bg-paper-raised py-8">
+          <Heading>Couldn't finish the plan</Heading>
+          <Body className="text-center">
+            The AI service hit a rate limit or ran out of quota while finding a venue.
+          </Body>
+          <Button
+            label="Try again"
+            loading={generate.isPending}
+            onPress={() => generate.mutate()}
+          />
+        </Card>
+      ) : null}
+
+      {group.data && !activity && !isGenerating && !isFailed ? (
         <Card className="items-center py-8">
           <Sparkles size={28} color="#5B7A6B" />
           <Body className="text-center">

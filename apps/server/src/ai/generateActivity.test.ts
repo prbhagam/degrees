@@ -3,20 +3,31 @@
 // `npx tsx src/ai/generateActivity.test.ts` from apps/server.
 import assert from 'node:assert/strict';
 import type { GenerateActivityInput } from '@degrees/shared';
+import { env } from '../config/env.js';
 import { activityFixture } from '../mocks/fixtures.js';
 import {
   activityJobSchema,
   avoidRules,
   constraintViolation,
+  extractCitedPlaces,
   isPreviousTitle,
   isPreviousVenue,
+  isRateLimitError,
   previousPlansBlock,
   MAX_REJECTIONS,
   newActivityJob,
+  parseIsoOrNull,
   runActivityStage,
   sharedInterests,
   violatesAvoids,
 } from './generateActivity.js';
+
+// The tests verify fallback chains without external API calls. Clear keys so tests run in mock mode
+// regardless of whether `.env` contains live credentials.
+const mutableEnv = env as { -readonly [K in keyof typeof env]: (typeof env)[K] };
+mutableEnv.geminiApiKey = undefined;
+mutableEnv.googleMapsApiKey = undefined;
+mutableEnv.ticketmasterApiKey = undefined;
 
 const input: GenerateActivityInput = {
   members: [{ displayName: 'Avery', interests: ['bouldering'], avoids: [] }],
@@ -228,6 +239,60 @@ await test('an older job row without `rejected` still parses', async () => {
   const parsed = activityJobSchema.parse({ stage: 'grounded', startedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
   assert.deepEqual(parsed.rejected, []);
   assert.deepEqual(parsed.errors, []);
+});
+
+await test('extractCitedPlaces extracts both Google Maps and Google Search grounding citations', async () => {
+  const chunks = [
+    {
+      maps: {
+        title: 'Stone Summit Climbing - Midtown - Google Maps',
+        placeId: 'ChIJ12345',
+        uri: 'https://maps.google.com/?cid=123',
+      },
+    },
+    {
+      web: {
+        title: 'Stone Summit Day Pass Pricing & Hours',
+        uri: 'https://stonesummit.com/pricing',
+      },
+    },
+    {
+      // Irrelevant or malformed chunk should be skipped
+      web: { title: 'No URI' },
+    },
+  ];
+  const places = extractCitedPlaces(chunks);
+  assert.equal(places.length, 2);
+  assert.deepEqual(places[0], {
+    title: 'Stone Summit Climbing - Midtown',
+    placeId: 'ChIJ12345',
+    uri: 'https://maps.google.com/?cid=123',
+  });
+  assert.deepEqual(places[1], {
+    title: 'Stone Summit Day Pass Pricing & Hours',
+    placeId: null,
+    uri: 'https://stonesummit.com/pricing',
+  });
+});
+
+await test('parseIsoOrNull parses valid dates to ISO string and returns null for invalid/empty inputs', async () => {
+  assert.equal(parseIsoOrNull('2026-10-15T18:00:00Z'), '2026-10-15T18:00:00.000Z');
+  assert.equal(parseIsoOrNull('October 15, 2026 18:00:00 UTC'), '2026-10-15T18:00:00.000Z');
+  assert.equal(parseIsoOrNull('not-a-date'), null);
+  assert.equal(parseIsoOrNull(''), null);
+  assert.equal(parseIsoOrNull(null), null);
+  assert.equal(parseIsoOrNull(undefined), null);
+});
+
+await test('isRateLimitError detects 429 and RESOURCE_EXHAUSTED errors', async () => {
+  assert.equal(isRateLimitError({ status: 429 }), true);
+  assert.equal(isRateLimitError({ status: 'RESOURCE_EXHAUSTED' }), true);
+  assert.equal(isRateLimitError({ code: 429 }), true);
+  assert.equal(isRateLimitError({ error: { code: 429, status: 'RESOURCE_EXHAUSTED' } }), true);
+  assert.equal(isRateLimitError(new Error('You exceeded your current quota, please check your plan')), true);
+  assert.equal(isRateLimitError(new Error('Rate limit exceeded')), true);
+  assert.equal(isRateLimitError(new Error('Something completely unrelated')), false);
+  assert.equal(isRateLimitError(null), false);
 });
 
 console.warn = silence;

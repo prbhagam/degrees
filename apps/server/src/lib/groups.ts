@@ -400,10 +400,10 @@ export async function loadGroup(
   // Christian (PR #22): a row with status 'generating' is the placeholder written by POST /activity while the
   // background function works; the client polls/subscribes until it flips to 'ready'.
   const activityStatus = (activityRow?.status as ActivityStatus | null) ?? (activityRow ? 'ready' : null);
-  const activity = activityRow ? toActivity(activityRow) : null;
+  const activity = activityRow && activityRow.status !== 'failed' ? toActivity(activityRow) : null;
   const activityHistory = dedupePlans(
     activityRows
-      .slice(1)
+      .slice(activityRow?.status === 'ready' ? 1 : 0)
       .filter((row) => (row.status ?? 'ready') === 'ready')
       .flatMap((row) => {
         const parsed = toActivity(row);
@@ -1029,6 +1029,26 @@ export async function updateActivityJob(
   if (error) {
     throw new Error(`activities update failed: ${error.message}`);
   }
+}
+
+// Atomically claims a stage lock if the job is still generating and either un-locked or the previous lock expired.
+// Returns true if this caller won the lock, false if a concurrent call beat it.
+export async function claimActivityStageLock(
+  activityId: string,
+  lockedJob: ActivityJob,
+): Promise<boolean> {
+  const nowIso = new Date().toISOString();
+  const { data, error } = await getServiceClient()
+    .from('activities')
+    .update({ job: lockedJob })
+    .eq('id', activityId)
+    .eq('status', 'generating')
+    .or(`job->>lockedUntil.is.null,job->>lockedUntil.lte.${nowIso}`)
+    .select('id');
+  if (error) {
+    throw new Error(`activities lock update failed: ${error.message}`);
+  }
+  return Boolean(data && data.length > 0);
 }
 
 // Christian (PR #22): the placeholder row POST /activity writes before handing off to the background function.
