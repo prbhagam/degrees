@@ -1,6 +1,12 @@
 // Owner: Sahith (Data & Matching) — run: npx tsx apps/server/src/routes/auth.test.ts (no network).
 import assert from 'node:assert/strict';
-import { emailSchema, isDemoEmail, signupRequestSchema, usernameSchema } from '@degrees/shared';
+import {
+  emailSchema,
+  isDemoEmail,
+  loginRequestSchema,
+  signupRequestSchema,
+  usernameSchema,
+} from '@degrees/shared';
 
 let failures = 0;
 function test(name: string, run: () => void) {
@@ -32,6 +38,13 @@ test('usernameSchema lowercases and trims, and enforces 3–20 of [a-z0-9._]', (
   for (const bad of ['ab', 'a'.repeat(21), 'has space', 'at@sign', 'dash-name', '']) {
     assert.equal(usernameSchema.safeParse(bad).success, false, bad);
   }
+});
+
+test('loginRequestSchema takes a username with or without the @, and never an email', () => {
+  assert.equal(loginRequestSchema.parse({ username: ' @Maya.Chen ', password: 'x' }).username, 'maya.chen');
+  assert.equal(loginRequestSchema.parse({ username: 'maya.chen', password: 'x' }).username, 'maya.chen');
+  assert.equal(loginRequestSchema.safeParse({ username: 'maya@degrees.demo', password: 'x' }).success, false);
+  assert.equal(loginRequestSchema.safeParse({ username: 'maya.chen', password: '' }).success, false);
 });
 
 test('signupRequestSchema requires a real (non-demo) email, name, phone, and an 8+ character password', () => {

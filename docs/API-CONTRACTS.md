@@ -14,8 +14,10 @@ This file is what makes four people concurrent. It is implemented as TypeScript 
 
 **CHANGED Sep 27 (wave 6, branch `sahith/wave6`)** — additive, no migration: `POST /api/events` takes nothing (`name`, `groupSizeMin`, `groupSizeMax` all optional; an unnamed meetup has `name: null` and the app titles it by who's joined); `HangoutSummary` gains `memberNames` + `unrevealedCount` (the other members the viewer may see, same redaction rule as `GroupResponse`) and `feedbackGiven`; new `GET /api/graph/reach` (real headcounts for the degree dial, counts only), `POST /api/profile/tags` (paragraph → suggested interests + avoids, real Gemini call), `PUT /api/profile/photo` (the avatar alone, for signup); `MATCHED_GROUP_MAX` (8) is exported from `@degrees/shared`. `GroupMember.degree` is never 0 for anyone but the viewer (the host used to come back as a second "You"). Follow-up: `GenerateActivityInput.previousPlans` (internal).
 
+**CHANGED Sep 27 (username login)** — additive, no migration: new public `POST /api/auth/login` (username + password → session tokens). Email logins are unchanged (the app signs in with Supabase directly).
+
 **Base:** `https://degrees-api.netlify.app` (`api.degrees.tech` once DNS exists)
-**Auth:** every endpoint except `POST /api/auth/signup` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
+**Auth:** every endpoint except `POST /api/auth/signup` and `POST /api/auth/login` requires `Authorization: Bearer <supabase-jwt>`. The server derives `userId` from the verified token — **never from the request body**.
 
 ---
 
@@ -29,11 +31,19 @@ POST /api/auth/signup            // PUBLIC — no Authorization header
   // email: trimmed + lowercased; @degrees.demo is rejected (reserved for seeded demo accounts).
   // username: 3–20 of [a-z0-9._], lowercased server-side — the @handle, not a login. password: 8+ chars.
   // The server creates the Supabase auth user already confirmed, with that email, plus the profiles
-  // row. The client then signs in with supabase.auth.signInWithPassword({ email, password }). Login
-  // is the same call — there is no login route.
+  // row. The client then signs in with supabase.auth.signInWithPassword({ email, password }). An email
+  // login is the same call; a username login uses the route below.
   // 409 username_taken · 409 email_taken · 400 invalid_request
   // Why server-side: the Supabase project requires email confirmation (rate-limited mailer; the
   // email isn't verified by us yet), and nothing else creates a new user's profiles row.
+
+// Added Sep 27: log in with the username instead of the email.
+POST /api/auth/login             // PUBLIC — no Authorization header
+  { username, password }         // username: a leading "@" is dropped, then the usernameSchema rules
+  → { accessToken, refreshToken } // the client passes these to supabase.auth.setSession
+  // The server resolves username → the account's email with the service role and signs in itself, so no
+  // email is ever returned for a username. 401 invalid_credentials (unknown username and wrong password
+  // look the same) · 429 rate_limited · 400 invalid_request
 
 // ---- Profile & preferences ------------------------------------------------
 GET  /api/me

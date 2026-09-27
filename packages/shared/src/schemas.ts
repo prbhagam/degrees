@@ -104,6 +104,17 @@ export const signupRequestSchema = z.object({
   pronouns: z.string().trim().optional(),
 });
 
+// Added Sep 27: POST /api/auth/login — log in with the @handle instead of the email. A leading "@" is dropped, so
+// "@maya.chen" and "maya.chen" are the same login. Email logins don't use this (the app signs in with Supabase).
+export const loginRequestSchema = z.object({
+  username: z
+    .string()
+    .trim()
+    .transform((value) => value.replace(/^@/, ''))
+    .pipe(usernameSchema),
+  password: z.string().min(1, 'Enter your password.'),
+});
+
 // Added Sep 27 (wave 6): PUT /api/profile/photo — just the avatar, for signup, where the rest of the profile doesn't
 // exist yet (PUT /api/profile replaces every field, tags included).
 export const updatePhotoRequestSchema = z.object({

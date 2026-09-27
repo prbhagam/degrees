@@ -2,7 +2,7 @@
 // moved here because every feature uses it, not just groups. CHANGED Sep 26: restyled from the
 // original violet/rounded-2xl look to the validated ember/paper/Fraunces+PublicSans design.
 import { DegreesMark } from './DegreesMark';
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, type Ref } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -394,8 +394,9 @@ export function Field({
   hint,
   secureTextEntry,
   ...props
-}: TextInputProps & { label?: string; hint?: string }) {
-  // Added Sep 26 (wave 2): password fields get a show/hide toggle.
+}: TextInputProps & { label?: string; hint?: string; ref?: Ref<TextInput> }) {
+  // Added Sep 26 (wave 2): password fields get a show/hide toggle. CHANGED Sep 27: `ref` reaches the TextInput (via
+  // ...props, React 19) so a form can move focus to the next field on return.
   const [revealed, setRevealed] = useState(false);
   const secure = Boolean(secureTextEntry);
   return (

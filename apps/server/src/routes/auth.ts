@@ -6,9 +6,15 @@
 // CHANGED Sep 27: the auth email is the person's real email (it used to be `<username>@degrees.demo`). The
 // username is still collected and unique, as the @handle. `@degrees.demo` is reserved for the seeded demo
 // accounts (signupEmailSchema rejects it), so supabase/scripts/purge_demo_users.sql can find them by domain.
+// CHANGED Sep 27: POST /auth/login signs in with a username. The app can't turn a username into the account's email
+// (auth.users isn't readable, and handing emails out by username would leak them), so the server looks the email up
+// and signs in itself, returning only the session. Email logins still go straight from the app to Supabase.
 import { Hono } from 'hono';
+import { createClient } from '@supabase/supabase-js';
 import {
+  loginRequestSchema,
   signupRequestSchema,
+  type LoginResponse,
   type SignupResponse,
 } from '@degrees/shared';
 import { env } from '../config/env.js';
@@ -21,10 +27,66 @@ const usernameTaken = () =>
   new ApiError(409, 'username_taken', 'That username is taken.');
 const emailTaken = () =>
   new ApiError(409, 'email_taken', 'An account with that email already exists. Try logging in.');
+// One message for an unknown username and a wrong password, so the route can't be used to check which usernames exist.
+const invalidCredentials = () =>
+  new ApiError(401, 'invalid_credentials', 'Wrong username or password.');
 
-export const authRoutes = new Hono<AppEnv>().post(
-  '/auth/signup',
-  async (context) => {
+export const authRoutes = new Hono<AppEnv>()
+  .post('/auth/login', async (context) => {
+    const request = await validateJson(context, loginRequestSchema);
+
+    if (env.mockMode) {
+      // The app skips sign-in entirely when it has no Supabase project, so this only runs against a half-configured
+      // setup; there's no real session to hand back.
+      throw new ApiError(503, 'mock_mode', 'Username login needs the real server. Log in with your email instead.');
+    }
+
+    const db = getServiceClient();
+    const { data: profile, error: lookupError } = await db
+      .from('profiles')
+      .select('id')
+      .eq('username', request.username)
+      .maybeSingle();
+    if (lookupError) {
+      throw new Error(`profiles lookup failed: ${lookupError.message}`);
+    }
+    if (!profile) {
+      throw invalidCredentials();
+    }
+
+    const { data: found, error: userError } = await db.auth.admin.getUserById(profile.id);
+    if (userError || !found.user?.email) {
+      console.error('[auth/login] no auth email for profile', profile.id, userError);
+      throw invalidCredentials();
+    }
+
+    // A throwaway client: signing in stores the user's session on the client, which would turn the shared service
+    // client's requests into that user's.
+    const signIn = createClient(env.supabaseUrl!, env.supabaseServiceRoleKey!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: session, error: signInError } = await signIn.auth.signInWithPassword({
+      email: found.user.email,
+      password: request.password,
+    });
+    if (signInError || !session.session) {
+      if (signInError?.code === 'invalid_credentials') {
+        throw invalidCredentials();
+      }
+      if (signInError?.status === 429) {
+        throw new ApiError(429, 'rate_limited', 'Too many tries. Wait a minute and try again.');
+      }
+      console.error('[auth/login] signInWithPassword failed:', signInError);
+      throw new ApiError(500, 'login_failed', 'Could not log in right now.');
+    }
+
+    const response = {
+      accessToken: session.session.access_token,
+      refreshToken: session.session.refresh_token,
+    } satisfies LoginResponse;
+    return context.json(response);
+  })
+  .post('/auth/signup', async (context) => {
     const request = await validateJson(context, signupRequestSchema);
 
     if (env.mockMode) {
@@ -85,5 +147,4 @@ export const authRoutes = new Hono<AppEnv>().post(
 
     const response = { ok: true, userId } satisfies SignupResponse;
     return context.json(response);
-  },
-);
+  });
