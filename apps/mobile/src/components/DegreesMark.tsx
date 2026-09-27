@@ -7,18 +7,22 @@
 // ascender, exactly as designed.
 //
 // Animated (loading indicator, and the tail of the splash), it runs a repeating three-beat cycle: the ink "d"
-// shrinks and gradients ink -> ember as it fades into a ring parked opposite the ring's resting spot (far enough
-// past the letter that the orbit never crosses it), while the ring simultaneously grows and gradients ember ->
-// ink as it fades into the new "d" — then that parked ring sweeps counterclockwise exactly halfway round the
-// letter, landing back at the ring's original top-right spot — then it repeats. `loop={false}` runs the cycle
-// once and calls `onDone`, settled at the same resting pose it started from.
+// shrinks away as an ember ring fades in at a spot parked opposite the ring's resting spot (far enough past the
+// letter that the orbit never crosses it), while an ember ring the shape of the old one grows and fades away as
+// the new ink "d" fades in behind it — the fade is what reads as ink gradienting to ember and back, not a color
+// animation on either shape — then the parked ring sweeps counterclockwise exactly halfway round the letter,
+// landing back at the ring's original top-right spot — then it repeats. `loop={false}` runs the cycle once and
+// calls `onDone`, settled at the same resting pose it started from.
+//
+// Colour is always a static prop, never animated through useAnimatedStyle: Reanimated's fast path doesn't
+// reliably drive Image#tintColor per frame, so every element keeps one fixed tint for its whole lifetime and
+// the gradient is an illusion of the crossfade.
 import { useEffect } from 'react';
 import { Image, View } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
   interpolate,
-  interpolateColor,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -50,13 +54,20 @@ const TOPRIGHT_ANGLE = (Math.atan2(RING_DY, RING_DX) * 180) / Math.PI;
 // The park spot is the point opposite the ring's resting spot on that same circle — a half-orbit away.
 const PARK_ANGLE = TOPRIGHT_ANGLE + 180;
 
+// Plain (non-worklet) version for the module-scope math below — called at import time, before any Reanimated
+// UI-runtime context exists, so it must not carry the 'worklet' directive.
+function polarBoxPlain(cx: number, cy: number, radius: number, angleDeg: number, itemSize: number) {
+  const rad = (angleDeg * Math.PI) / 180;
+  return { left: cx + radius * Math.cos(rad) - itemSize / 2, top: cy + radius * Math.sin(rad) - itemSize / 2, width: itemSize, height: itemSize };
+}
+
 function polarBox(cx: number, cy: number, radius: number, angleDeg: number, itemSize: number) {
   'worklet';
   const rad = (angleDeg * Math.PI) / 180;
   return { left: cx + radius * Math.cos(rad) - itemSize / 2, top: cy + radius * Math.sin(rad) - itemSize / 2, width: itemSize, height: itemSize };
 }
 
-const PARK = polarBox(D_CENTER.x, D_CENTER.y, ORBIT_R, PARK_ANGLE, RING_SIZE);
+const PARK = polarBoxPlain(D_CENTER.x, D_CENTER.y, ORBIT_R, PARK_ANGLE, RING_SIZE);
 // Transitional (fading-out) shapes: the shrinking d collapses toward the park spot, matching the size the stable
 // ring will fade in at there; the growing ring swells past the d's own footprint before it's fully faded, so the
 // crossfade never shows a gap.
@@ -112,9 +123,9 @@ export function DegreesMark({
     return EASE(interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP));
   };
 
-  // Transitional element: box + opacity + tint all driven by the same eased morph progress, fading OUT as it
-  // travels from `from` toward `to` and gradients from `colorFrom` to `colorTo`.
-  const useTransitionalStyle = (from: typeof D_POSE, to: typeof D_POSE, colorFrom: string, colorTo: string) =>
+  // Transitional element: box + opacity driven by the same eased morph progress, fading OUT as it travels from
+  // `from` toward `to`. Colour is fixed per element (see file header) — the gradient is the crossfade itself.
+  const useTransitionalStyle = (from: typeof D_POSE, to: typeof D_POSE) =>
     useAnimatedStyle(() => {
       const t = morphT();
       return {
@@ -124,7 +135,6 @@ export function DegreesMark({
         width: px(from.width + t * (to.width - from.width)),
         height: px(from.height + t * (to.height - from.height)),
         opacity: 1 - t,
-        tintColor: interpolateColor(t, [0, 1], [colorFrom, colorTo]),
       };
     });
   const fadeInStyle = useAnimatedStyle(() => ({ opacity: morphT() }));
@@ -134,11 +144,11 @@ export function DegreesMark({
     const orbitT = EASE(interpolate(master.value, [mMorph, mOrbit], [0, 1], Extrapolation.CLAMP));
     const angle = PARK_ANGLE - 180 * orbitT;
     const box = polarBox(px(D_CENTER.x), px(D_CENTER.y), px(ORBIT_R), angle, px(RING_SIZE));
-    return { position: 'absolute', ...box, opacity: morphT(), tintColor: EMBER };
+    return { position: 'absolute', ...box, opacity: morphT() };
   });
 
-  const dShrinkingStyle = useTransitionalStyle(D_POSE, D_SHRUNK, INK, EMBER);
-  const ringGrowingStyle = useTransitionalStyle(RING_TOPRIGHT, RING_GROWN, EMBER, INK);
+  const dShrinkingStyle = useTransitionalStyle(D_POSE, D_SHRUNK);
+  const ringGrowingStyle = useTransitionalStyle(RING_TOPRIGHT, RING_GROWN);
 
   if (!animated) {
     return (
@@ -151,10 +161,10 @@ export function DegreesMark({
 
   return (
     <View style={{ width: size, height: size }}>
-      {/* Transitional: the old d shrinking away, gradienting ink -> ember, toward the park spot. */}
+      {/* Transitional: the old ink d shrinking away toward the park spot. */}
       <Animated.Image source={dGlyph} resizeMode="contain" style={dShrinkingStyle} />
-      {/* Transitional: the old ring swelling, gradienting ember -> ink, toward the d's footprint. */}
-      <Animated.Image source={ringGlyph} resizeMode="contain" style={ringGrowingStyle} />
+      {/* Transitional: the old ember ring swelling toward the d's footprint. */}
+      <Animated.Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={ringGrowingStyle} />
       {/* Stable: the new d, ink, fixed at D_POSE, fading in. */}
       <Animated.Image
         source={dGlyph}
@@ -162,7 +172,7 @@ export function DegreesMark({
         style={[{ position: 'absolute', left: px(D_POSE.left), top: px(D_POSE.top), width: px(D_POSE.width), height: px(D_POSE.height) }, fadeInStyle]}
       />
       {/* Stable: the new ring, ember, parked then sweeping halfway home. */}
-      <Animated.Image source={ringGlyph} resizeMode="contain" style={ringOrbitStyle} />
+      <Animated.Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={ringOrbitStyle} />
     </View>
   );
 }
