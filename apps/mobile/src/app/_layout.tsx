@@ -3,7 +3,7 @@
 // CHANGED Sep 26 (wave 2): the query cache persists to disk (PersistQueryClientProvider), the app refetches on
 // foreground, and the auth/onboarding screens can't be swiped back to from inside the app.
 import '../global.css';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
 import { Stack } from 'expo-router';
@@ -41,6 +41,9 @@ export default function RootLayout() {
   const authLoading = useSessionStore((state) => state.authStatus === 'loading');
   // Wave 4: the animated splash takes over from the (plain paper) native splash and lifts off ~1.5s later.
   const [splashDone, setSplashDone] = useState(false);
+  // Stable identity: a fresh closure here on every render of this (root) component would restart
+  // DegreesMark's animation effect on each render (onDone is in its dependency array), corrupting the timing.
+  const handleSplashDone = useCallback(() => setSplashDone(true), []);
 
   // The splash stays up until the saved session is restored, so no screen renders signed-out first.
   useEffect(() => {
@@ -70,7 +73,7 @@ export default function RootLayout() {
       </Stack>
       <AuthGate />
       <StatusBar style="auto" />
-      {!splashDone ? <AnimatedSplash onDone={() => setSplashDone(true)} /> : null}
+      {!splashDone ? <AnimatedSplash onDone={handleSplashDone} /> : null}
     </PersistQueryClientProvider>
     </GestureHandlerRootView>
   );

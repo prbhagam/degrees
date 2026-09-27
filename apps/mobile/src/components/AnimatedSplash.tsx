@@ -6,7 +6,7 @@
 // both are struck, that's exactly DegreesMark's resting pose, so the swap to <DegreesMark animated loop={false}>
 // is pixel-for-pixel: it runs its shrink/grow/orbit cycle once, then the whole thing lifts to reveal the app
 // underneath. Runs once per cold start; never blocks — the app renders from frame one.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Image, StyleSheet } from 'react-native';
 import Animated, {
   Easing,
@@ -71,11 +71,16 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleGraphicDone = () => {
+  // Stable identity: DegreesMark's setup effect has `onDone` in its dependency array, so a fresh closure here on
+  // every AnimatedSplash render would tear down and restart the whole shrink/grow/orbit animation mid-flight —
+  // from whatever master.value it had reached, over the same total duration — corrupting and stretching out the
+  // timing on any re-render that happens to land while the graphic phase is running.
+  const handleGraphicDone = useCallback(() => {
     lift.value = withTiming(1, { duration: 450, easing: Easing.in(Easing.cubic) }, (finished) => {
       if (finished) runOnJS(onDone)();
     });
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onDone]);
 
   const overlayStyle = useAnimatedStyle(() => ({ opacity: 1 - lift.value }));
   const markStyle = useAnimatedStyle(() => ({
