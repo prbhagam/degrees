@@ -1,4 +1,5 @@
 // Owner: Christian (Server & Infra) — admin web panel and batch matching demo trigger.
+// CHANGED Sep 26 (Sahith): the run is one global pass now — the panel shows AI calls, AI vs fallback groups, and time.
 import { Hono } from 'hono';
 import { runPeriodicBatchMatching, type BatchMatchSummary } from '../matching/periodicMatch.js';
 import type { AppEnv } from '../middleware/auth.js';
@@ -190,7 +191,8 @@ export const adminRoutes = new Hono<AppEnv>()
       <div class="card-desc">
         Trigger a full periodic match run for all users across the network.
         <br>• Enforces: Users with 0 first-degree connections cannot match with anyone.
-        <br>• Matches each eligible user into 1 to 3 distinct groups.
+        <br>• Forms every group in one pass (one AI call per ~30 connected people), respecting each person's degrees, budget, distance, and feedback.
+        <br>• Each eligible user gets 1 to 3 distinct groups — just 1 when they don't have strong matches.
       </div>
       <button id="runBtn" class="btn" onclick="triggerBatchMatch()">
         <span id="btnIcon">⚡</span>
@@ -206,12 +208,28 @@ export const adminRoutes = new Hono<AppEnv>()
             <div id="statTotal" class="stat-value">0</div>
           </div>
           <div class="stat-box">
-            <div class="stat-label">Matched Users</div>
+            <div class="stat-label">Eligible Users</div>
             <div id="statEligible" class="stat-value">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Matched Users</div>
+            <div id="statMatched" class="stat-value">0</div>
           </div>
           <div class="stat-box">
             <div class="stat-label">Groups Created</div>
             <div id="statGroups" class="stat-value">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">AI Calls</div>
+            <div id="statAiCalls" class="stat-value">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">AI / Fallback Groups</div>
+            <div id="statSources" class="stat-value">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Run Time</div>
+            <div id="statDuration" class="stat-value">0</div>
           </div>
         </div>
 
@@ -253,7 +271,11 @@ export const adminRoutes = new Hono<AppEnv>()
 
         document.getElementById('statTotal').innerText = data.totalUsers;
         document.getElementById('statEligible').innerText = data.eligibleUsers;
+        document.getElementById('statMatched').innerText = data.matchedUsers;
         document.getElementById('statGroups').innerText = data.groupsCreated;
+        document.getElementById('statAiCalls').innerText = data.aiCalls;
+        document.getElementById('statSources').innerText = data.aiGroups + ' / ' + data.fallbackGroups;
+        document.getElementById('statDuration').innerText = (data.durationMs / 1000).toFixed(1) + 's';
 
         resultsBody.innerHTML = '';
         data.results.forEach(r => {

@@ -314,7 +314,7 @@ async function generateWithGemini(
   return response.text ?? '';
 }
 
-async function withTimeout(
+export async function withTimeout(
   run: (signal: AbortSignal) => Promise<string>,
   timeoutMs: number,
 ): Promise<string> {
