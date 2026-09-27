@@ -1,6 +1,6 @@
-// Owner: Pranav (Groups, Activities & Chat) — Gemini + Maps grounding, with Ticketmaster as the secondary source.
-// Maps grounding names the venue and returns its place id; Places (New) supplies coordinates, address, and price,
-// which grounding alone does not. Every step degrades to the next source so a demo never hard-fails.
+// Owner: Pranav (Groups, Activities & Chat) — Gemini + Maps and Google Search grounding, with Ticketmaster as secondary.
+// Maps grounding names the venue and returns its place id; Google Search grounding verifies public admission pricing,
+// day-pass rates, and scheduled event dates; Places (New) supplies coordinates, address, and price fallback.
 //
 // CHANGED Sep 26 (wave 2, Sahith): the chain also runs as a RESUMABLE JOB, one external call per function
 // invocation, because the team's Netlify plan caps synchronous functions at 10s and has no Background Functions.
@@ -79,8 +79,15 @@ const groundedPlanSchema = z.object({
   address: z.string().nullable().optional(),
   lat: z.number().nullable().optional(),
   lng: z.number().nullable().optional(),
+  startsAt: z.string().nullable().optional(),
 });
 export type GroundedPlan = z.infer<typeof groundedPlanSchema>;
+
+export function parseIsoOrNull(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
 
 const citedPlaceSchema = z.object({
   title: z.string(),
@@ -88,6 +95,30 @@ const citedPlaceSchema = z.object({
   uri: z.string().nullable(),
 });
 export type CitedPlace = z.infer<typeof citedPlaceSchema>;
+
+export function extractCitedPlaces(
+  chunks: Array<{ maps?: { title?: string; placeId?: string; uri?: string }; web?: { title?: string; uri?: string } }> = [],
+): CitedPlace[] {
+  const places: CitedPlace[] = [];
+  for (const chunk of chunks) {
+    if (chunk?.maps?.title) {
+      places.push({
+        // Grounding titles arrive as "Central Rock Gym - Midtown - Google Maps".
+        title: chunk.maps.title.replace(/\s+-\s+Google Maps$/i, ''),
+        placeId: chunk.maps.placeId ?? null,
+        uri: chunk.maps.uri ?? null,
+      });
+    }
+    if (chunk?.web?.title && chunk?.web?.uri) {
+      places.push({
+        title: chunk.web.title,
+        placeId: null,
+        uri: chunk.web.uri,
+      });
+    }
+  }
+  return places;
+}
 
 // The job row stored in activities.job between advances. Validated on read so a hand-edited or stale row can't
 // crash the route — an unparseable job restarts from the first stage.
@@ -338,12 +369,16 @@ async function groundedPlanWith(
 
 ${describeGroup(input, rejections)}
 
-Use Google Maps to choose ONE real, currently open venue for a low-pressure activity that most of the group would enjoy together — something to do, not just somewhere to sit. The distance and cost limits above are the group's own settings: verify both before answering, and if your first idea breaks one, pick another. If plans are listed as already given, yours MUST be a new idea — different from all of them in venue and in kind of activity.
+Use Google Maps and Google Search to choose ONE real, currently open venue or scheduled event for a low-pressure activity that most of the group would enjoy together — something to do, not just somewhere to sit.
+
+IMPORTANT: Do not assume an activity is free ($0) just because Google Maps does not list prices. Specialized venues (such as rock climbing gyms, bouldering, escape rooms, bowling, arcades, museums, kayak rentals, or ticketed events) typically charge day passes, entry fees, or gear rentals. Use Google Search grounding to verify actual public admission prices, day-pass rates, ticket costs, and scheduled dates/times.
+
+The distance and cost limits above are the group's own settings: verify both before answering, and if your first idea breaks one, pick another. If plans are listed as already given, yours MUST be a new idea — different from all of them in venue and in kind of activity.
 
 Reply with only a JSON object, no prose:
-{"venue": "<exact Google Maps name of the venue>", "title": "<short plan title, e.g. 'Bouldering + tacos after'>", "estimatedPricePerPersonUsd": <number or null>, "reasoning": "<one or two friendly sentences naming which members' interests this fits>", "address": "<street address>", "lat": <number>, "lng": <number>}`,
+{"venue": "<exact Google Maps name of the venue>", "title": "<short plan title, e.g. 'Bouldering + tacos after'>", "estimatedPricePerPersonUsd": <number or null>, "reasoning": "<one or two friendly sentences naming which members' interests this fits and mentioning verified pricing/schedule>", "address": "<street address>", "lat": <number>, "lng": <number>, "startsAt": "<ISO 8601 datetime if this is a time-specific event, otherwise null>"}`,
     config: {
-      tools: [{ googleMaps: {} }],
+      tools: [{ googleMaps: {} }, { googleSearch: {} }],
       toolConfig: {
         retrievalConfig: { latLng: { latitude: lat, longitude: lng } },
       },
@@ -368,19 +403,8 @@ Reply with only a JSON object, no prose:
       `about $${plan.estimatedPricePerPersonUsd.toFixed(0)} per person, but the group's budget is $${(input.constraints.maxCostCents / 100).toFixed(0)}`,
     );
   }
-  const places = (
-    response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []
-  ).flatMap(({ maps }) =>
-    maps?.title
-      ? [
-          {
-            // Grounding titles arrive as "Central Rock Gym - Midtown - Google Maps".
-            title: maps.title.replace(/\s+-\s+Google Maps$/i, ''),
-            placeId: maps.placeId ?? null,
-            uri: maps.uri ?? null,
-          },
-        ]
-      : [],
+  const places = extractCitedPlaces(
+    response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [],
   );
   return { plan, places };
 }
@@ -411,7 +435,13 @@ async function assembleFromMaps(
       .replace(/[^a-z0-9]+/g, ' ')
       .trim();
   const wanted = normalize(plan.venue);
+  const mapsPlaces = places.filter((p) => p.placeId !== null);
   const cited =
+    mapsPlaces.find(({ title }) => normalize(title) === wanted) ??
+    mapsPlaces.find(({ title }) => {
+      const candidate = normalize(title);
+      return candidate.startsWith(wanted) || wanted.startsWith(candidate);
+    }) ??
     places.find(({ title }) => normalize(title) === wanted) ??
     places.find(({ title }) => {
       const candidate = normalize(title);
@@ -461,7 +491,7 @@ async function assembleFromMaps(
     lng: location.lng,
     // The model's estimate reflects the planned activity; Places only knows the venue's general tier.
     priceCents: estimate ?? place?.priceCents ?? null,
-    startsAt: null,
+    startsAt: parseIsoOrNull(plan.startsAt),
     source: 'maps',
     sourceUrl: place?.mapsUri ?? cited?.uri ?? null,
     reasoning: plan.reasoning,
