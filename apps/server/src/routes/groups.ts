@@ -1,11 +1,16 @@
 // Owner: Pranav (Groups, Activities & Chat) — group view + activity; Christian owns the server framework.
+// CHANGED Sep 26 (wave 5, Sahith): proposed times for the plan (POST /times, /times/:id/vote, /times/:id/choose,
+// DELETE /times/:id); notifications on plan ready/restored, meetup ended (+ who got connected), and contact
+// exchange; "Use this plan" no longer duplicates the plan in mock mode either.
 import { Hono } from 'hono';
 import {
   addPhotoRequestSchema,
   exchangeRequestSchema,
+  proposeTimeRequestSchema,
   renameGroupRequestSchema,
   respondRequestSchema,
   restoreActivityRequestSchema,
+  timeVoteRequestSchema,
   type Activity,
   type ExchangeResponse,
   type GenerateActivityInput,
@@ -15,6 +20,8 @@ import {
   type OkResponse,
   type Photo,
   type PhotosResponse,
+  type TimeSlot,
+  type TimesResponse,
 } from '@degrees/shared';
 import { generateActivity, newActivityJob, runActivityStage } from '../ai/generateActivity.js';
 import { generateIcebreakers } from '../ai/generateIcebreakers.js';
@@ -24,6 +31,7 @@ import { displayNames } from '../lib/graph.js';
 import {
   activityInput,
   assertNotArchived,
+  chooseTime,
   groupNotFound,
   groupState,
   icebreakersInput,
@@ -33,6 +41,8 @@ import {
   loadGroup,
   meetupForGroup,
   memberRows,
+  proposeTime,
+  removeTime,
   renameGroup,
   respondToGroup,
   restoreActivity,
@@ -40,10 +50,12 @@ import {
   saveIcebreakers,
   setActivityGenerating,
   updateActivityJob,
+  voteTime,
 } from '../lib/groups.js';
 import { log, timed } from '../lib/log.js';
+import { notify } from '../lib/notify.js';
 import type { AppEnv } from '../middleware/auth.js';
-import { DEMO_GROUP_ID, groupFixture, icebreakersFixture, people } from '../mocks/fixtures.js';
+import { DEMO_GROUP_ID, groupFixture, icebreakersFixture, meFixture, people, timesFixture } from '../mocks/fixtures.js';
 import { getServiceClient } from '../db/supabase.js';
 
 // Signed read URLs for the private event-photos bucket; long enough to browse an album, short enough that a
@@ -84,10 +96,19 @@ function mockPlan(activity: Activity): Activity {
   return { ...activity, id: `mock-activity-${mockActivitySerial}`, createdAt: new Date().toISOString() };
 }
 function mockReplaceActivity(next: Activity): void {
+  // wave 5: a restored plan leaves the history (it's the current plan again) — it used to stay AND be copied.
+  mockActivityHistory = mockActivityHistory.filter((plan) => plan.id !== next.id);
   if (mockActivity && mockActivity.status !== 'generating') {
     mockActivityHistory = [mockActivity, ...mockActivityHistory];
   }
   mockActivity = mockPlan(next);
+}
+// wave 5: proposed times for the demo group, in memory.
+let mockTimes: TimeSlot[] = timesFixture();
+let mockTimeSerial = 1;
+let mockScheduledAt: string | null = null;
+function mockTimesView(): TimeSlot[] {
+  return mockTimes.map((slot) => ({ ...slot, chosen: mockScheduledAt === slot.startsAt }));
 }
 let mockCompletedAt: string | null = null;
 let mockStatus: GroupResponse['status'] = groupFixture.status;
@@ -173,6 +194,8 @@ export const groupRoutes = new Hono<AppEnv>()
         name: mockName,
         myResponse: mockMyResponse,
         acceptedCount: mockMyResponse === 'accepted' ? groupFixture.members.length : groupFixture.members.length - 1,
+        scheduledAt: mockScheduledAt,
+        times: mockTimesView(),
       } satisfies GroupResponse;
       return context.json(response);
     }
@@ -320,6 +343,8 @@ export const groupRoutes = new Hono<AppEnv>()
     if (result.activity) {
       await saveActivity(groupId, result.activity, 'ready', null);
       log.info('activity.job.ready', { groupId, userId, source: result.activity.source, stages: result.job.errors.length + 1 });
+      // wave 5: whoever's device finished the job already sees it; everyone else hears there's a plan.
+      await notifyPlanChanged(groupId, userId, result.activity.title);
       const response = { status: 'ready', stage: null, activity: result.activity } satisfies ActivityJobResponse;
       return context.json(response);
     }
@@ -346,7 +371,117 @@ export const groupRoutes = new Hono<AppEnv>()
     await memberRows(groupId, userId);
     const activity = await restoreActivity(groupId, activityId);
     log.info('activity.restored', { groupId, userId, activityId });
+    await notifyPlanChanged(groupId, userId, activity.title);
     const response: Activity = activity;
+    return context.json(response);
+  })
+  // ---- Times for the plan (Added Sep 26, wave 5) --------------------------------------------------
+  // The calendar lives here now, not on "Host a meetup": members propose times, say which they're free for, and
+  // any member locks one in (groups.scheduled_at). See lib/groups.ts.
+  .post('/groups/:id/times', async (context) => {
+    const groupId = context.req.param('id');
+    const userId = context.get('userId');
+    const { startsAt, note } = await validateJson(context, proposeTimeRequestSchema);
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      const at = new Date(startsAt);
+      at.setSeconds(0, 0);
+      const iso = at.toISOString();
+      let slot = mockTimes.find((existing) => existing.startsAt === iso);
+      if (!slot) {
+        mockTimeSerial += 1;
+        slot = {
+          id: `mock-time-${mockTimeSerial}`,
+          startsAt: iso,
+          note: note?.trim() || null,
+          proposedById: userId,
+          proposedByName: meFixture.displayName,
+          availableIds: [],
+          availableNames: [],
+          imAvailable: false,
+          chosen: false,
+        };
+        mockTimes = [...mockTimes, slot].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+      }
+      if (!slot.availableIds.includes(userId)) {
+        slot.availableIds.push(userId);
+        slot.availableNames.push(meFixture.displayName);
+        slot.imAvailable = true;
+      }
+      const response = { times: mockTimesView() } satisfies TimesResponse;
+      return context.json(response);
+    }
+    const times = await proposeTime(groupId, userId, startsAt, note);
+    log.info('groups.time_proposed', { userId, groupId, startsAt });
+    const response = { times } satisfies TimesResponse;
+    return context.json(response);
+  })
+  .post('/groups/:id/times/:timeId/vote', async (context) => {
+    const groupId = context.req.param('id');
+    const timeId = context.req.param('timeId');
+    const userId = context.get('userId');
+    const { available } = await validateJson(context, timeVoteRequestSchema);
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      const slot = mockTimes.find((existing) => existing.id === timeId);
+      if (!slot) {
+        throw new ApiError(404, 'time_not_found', 'That time is no longer proposed.');
+      }
+      const index = slot.availableIds.indexOf(userId);
+      if (available && index === -1) {
+        slot.availableIds.push(userId);
+        slot.availableNames.push(meFixture.displayName);
+      } else if (!available && index !== -1) {
+        slot.availableIds.splice(index, 1);
+        slot.availableNames.splice(index, 1);
+      }
+      slot.imAvailable = available;
+      const response = { times: mockTimesView() } satisfies TimesResponse;
+      return context.json(response);
+    }
+    const times = await voteTime(groupId, userId, timeId, available);
+    const response = { times } satisfies TimesResponse;
+    return context.json(response);
+  })
+  .post('/groups/:id/times/:timeId/choose', async (context) => {
+    const groupId = context.req.param('id');
+    const timeId = context.req.param('timeId');
+    const userId = context.get('userId');
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      const slot = mockTimes.find((existing) => existing.id === timeId);
+      if (!slot) {
+        throw new ApiError(404, 'time_not_found', 'That time is no longer proposed.');
+      }
+      mockScheduledAt = slot.startsAt;
+      const response = { times: mockTimesView() } satisfies TimesResponse;
+      return context.json(response);
+    }
+    const times = await chooseTime(groupId, userId, timeId);
+    log.info('groups.time_chosen', { userId, groupId, timeId });
+    const response = { times } satisfies TimesResponse;
+    return context.json(response);
+  })
+  .delete('/groups/:id/times/:timeId', async (context) => {
+    const groupId = context.req.param('id');
+    const timeId = context.req.param('timeId');
+    const userId = context.get('userId');
+    if (env.mockMode) {
+      assertMockGroup(groupId);
+      const slot = mockTimes.find((existing) => existing.id === timeId);
+      if (!slot) {
+        throw new ApiError(404, 'time_not_found', 'That time is no longer proposed.');
+      }
+      if (slot.proposedById !== userId) {
+        throw new ApiError(403, 'not_proposer', 'Only whoever proposed a time can remove it.');
+      }
+      mockTimes = mockTimes.filter((existing) => existing.id !== timeId);
+      if (mockScheduledAt === slot.startsAt) mockScheduledAt = null;
+      const response = { times: mockTimesView() } satisfies TimesResponse;
+      return context.json(response);
+    }
+    const times = await removeTime(groupId, userId, timeId);
+    const response = { times } satisfies TimesResponse;
     return context.json(response);
   })
   .post('/groups/:id/complete', async (context) => {
@@ -406,23 +541,50 @@ export const groupRoutes = new Hono<AppEnv>()
       const pairs = ids.flatMap((a, i) =>
         ids.slice(i + 1).map((b) => [a, b].sort() as [string, string]),
       );
+      // ignoreDuplicates + select returns only the rows this call inserted: the pairs that are NEW 1st degrees.
+      const newCount = new Map<string, number>();
       if (pairs.length > 0) {
-        const { error: connectError } = await db.from('connections').upsert(
-          pairs.map(([userA, userB]) => ({
-            user_a: userA,
-            user_b: userB,
-            met_context: 'event' as const,
-            event_id: meetup?.id ?? null,
-          })),
-          { onConflict: 'user_a,user_b', ignoreDuplicates: true },
-        );
+        const { data: inserted, error: connectError } = await db
+          .from('connections')
+          .upsert(
+            pairs.map(([userA, userB]) => ({
+              user_a: userA,
+              user_b: userB,
+              met_context: 'event' as const,
+              event_id: meetup?.id ?? null,
+            })),
+            { onConflict: 'user_a,user_b', ignoreDuplicates: true },
+          )
+          .select('user_a, user_b');
         if (connectError) {
           throw new Error(`connections insert failed: ${connectError.message}`);
         }
+        for (const row of inserted ?? []) {
+          for (const id of [row.user_a as string, row.user_b as string]) {
+            newCount.set(id, (newCount.get(id) ?? 0) + 1);
+          }
+        }
       }
       log.info('groups.meetup_ended', { userId, groupId, members: ids.length, pairs: pairs.length });
+      // wave 5: everyone else hears it ended, and anyone who gained 1st degrees hears how many.
+      const eventName = meetup?.name ?? null;
+      await notify(ids, 'event_changed', { groupId, name: eventName, change: 'ended' }, { exclude: userId });
+      await Promise.all(
+        ids
+          .filter((id) => (newCount.get(id) ?? 0) > 0)
+          .map((id) =>
+            notify([id], 'connection_added', { groupId, eventId: meetup?.id ?? null, eventName, count: newCount.get(id) }),
+          ),
+      );
     } else {
       log.info('groups.completed', { userId, groupId, members: members.length });
+      const { data: named } = await db.from('groups').select('name').eq('id', groupId).maybeSingle();
+      await notify(
+        members.map((row) => row.user_id),
+        'event_changed',
+        { groupId, name: (named?.name as string | null) ?? null, change: 'ended' },
+        { exclude: userId },
+      );
     }
     const response = { ok: true } satisfies OkResponse;
     return context.json(response);
@@ -506,6 +668,25 @@ export const groupRoutes = new Hono<AppEnv>()
     const response: PhotosResponse = { photos: await listPhotos(groupId) };
     return context.json(response);
   });
+
+// wave 5: "the plan changed" for everyone but the person whose action changed it.
+async function notifyPlanChanged(groupId: string, actorId: string, title: string): Promise<void> {
+  const db = getServiceClient();
+  const [members, group] = await Promise.all([
+    db.from('group_members').select('user_id').eq('group_id', groupId),
+    db.from('groups').select('name').eq('id', groupId).maybeSingle(),
+  ]);
+  if (members.error) {
+    log.warn('notify.plan_changed.members_failed', { groupId, errorMessage: members.error.message });
+    return;
+  }
+  await notify(
+    members.data.map((row) => row.user_id as string),
+    'event_changed',
+    { groupId, name: (group.data?.name as string | null) ?? null, change: 'plan', detail: title },
+    { exclude: actorId },
+  );
+}
 
 async function listPhotos(groupId: string): Promise<Photo[]> {
   const { data, error } = await getServiceClient()
@@ -598,6 +779,16 @@ async function requestOrAcceptExchange(
     throw new Error(`contact_exchanges write failed: ${writeError.message}`);
   }
   const bothAccepted = next.a_accepted && next.b_accepted;
+  // wave 5: the peer hears about it — once, on the tap that flipped the caller's side (a re-tap is silent).
+  const flipped = !(userId === userA ? aAccepted : bAccepted);
+  if (flipped) {
+    const callerName = (await displayNames([userId])).get(userId) ?? 'Someone';
+    await notify([peerId], bothAccepted ? 'exchange_accepted' : 'exchange_requested', {
+      groupId,
+      peerId: userId,
+      peerName: callerName,
+    });
+  }
   let peerPhone: string | null = null;
   if (bothAccepted) {
     const { data: peerProfile } = await db

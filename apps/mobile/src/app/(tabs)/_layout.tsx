@@ -1,16 +1,28 @@
 // Owner: shared mobile scaffold (Charles) — the persistent bottom nav from the validated design
-// (Home / Circle / Profile). Added Sep 26 — previously these 3 screens had no real navigation
+// (Home / Chats / Circle / Profile). Added Sep 26 — previously these screens had no real navigation
 // between them at all, only the __DEV__ links list in HomeScreen stood in for it.
+// CHANGED Sep 26 (wave 5, Sahith): a Chats tab (every open group chat in one place), and the bar's items are
+// centred — they used to hug the top edge with the whole home-indicator inset left blank underneath.
 import { Tabs } from 'expo-router';
-import { House, Network, User } from 'lucide-react-native';
+import { House, MessageCircle, Network, User } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
   return (
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: '#20201C',
         tabBarInactiveTintColor: '#8A8378',
-        tabBarStyle: { backgroundColor: '#FFFFFF', borderTopColor: '#E4DDD0' },
+        tabBarStyle: {
+          backgroundColor: '#FFFFFF',
+          borderTopColor: '#E4DDD0',
+          height: 58 + insets.bottom,
+          paddingTop: 8,
+          paddingBottom: Math.max(insets.bottom, 8),
+        },
+        tabBarItemStyle: { paddingVertical: 2 },
+        tabBarLabelStyle: { fontFamily: 'PublicSans_600SemiBold', fontSize: 11, marginTop: 2 },
         headerStyle: { backgroundColor: '#F7F3EC' },
         headerShadowVisible: false,
         headerTitleStyle: { fontFamily: 'Fraunces_700Bold', color: '#20201C', fontSize: 20 },
@@ -23,6 +35,14 @@ export default function TabsLayout() {
           title: 'Degrees',
           tabBarLabel: 'Home',
           tabBarIcon: ({ color, size }) => <House color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="chats"
+        options={{
+          title: 'Chats',
+          tabBarLabel: 'Chats',
+          tabBarIcon: ({ color, size }) => <MessageCircle color={color} size={size} />,
         }}
       />
       <Tabs.Screen

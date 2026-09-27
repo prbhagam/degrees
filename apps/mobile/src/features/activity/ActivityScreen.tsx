@@ -2,7 +2,10 @@
 // CHANGED Sep 26 (wave 3): plans are kept. Earlier plans list under the current one (GroupResponse.activityHistory)
 // with "Use this plan" to bring one back, and "Suggest something else" tells the planner which venues it already
 // suggested, so it stops returning the same place.
-import type { Activity } from '@degrees/shared';
+// CHANGED Sep 26 (wave 5, Sahith): "When" lives here (TimesCard) — propose times, say you're free, lock one in.
+// "Use this plan" no longer duplicates: the restored plan leaves Earlier plans (server moves the row; the cache
+// mirrors that before the refetch).
+import type { Activity, GroupResponse } from '@degrees/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { format, parseISO } from 'date-fns';
 import * as Linking from 'expo-linking';
@@ -32,6 +35,7 @@ import {
 } from '@/components/ui';
 import { api } from '@/lib/api';
 import { formatPrice, formatStartsAt } from './format';
+import { TimesCard } from './TimesCard';
 import { useActivityJob } from './useActivityJob';
 
 function directionsUrl(activity: Activity): string {
@@ -173,19 +177,21 @@ export function ActivityScreen() {
   const queryClient = useQueryClient();
   const group = useGroup(id);
 
-  const applyPlan = (activity: Activity) => {
-    // The response is the saved plan, so the group view can show it without a refetch.
-    queryClient.setQueryData(
-      queryKeys.group(id),
-      (previous: typeof group.data) =>
-        previous
-          ? {
-              ...previous,
-              activity,
-              activityStatus: activity.status ?? 'ready',
-            }
-          : previous,
-    );
+  // The response is the saved plan, so the group view can show it without a refetch. `restoredId` (wave 5): the
+  // plan being brought back leaves Earlier plans and the one it replaces joins them, mirroring the server.
+  const applyPlan = (activity: Activity, restoredId?: string) => {
+    queryClient.setQueryData<GroupResponse>(queryKeys.group(id), (previous) => {
+      if (!previous) return previous;
+      let activityHistory = previous.activityHistory;
+      if (restoredId) {
+        const outgoing = previous.activity;
+        activityHistory = [
+          ...(outgoing && outgoing.status !== 'generating' && outgoing.id !== restoredId ? [outgoing] : []),
+          ...previous.activityHistory.filter((plan) => plan.id !== restoredId),
+        ];
+      }
+      return { ...previous, activity, activityStatus: activity.status ?? 'ready', activityHistory };
+    });
     void queryClient.invalidateQueries({ queryKey: queryKeys.group(id) });
   };
 
@@ -195,7 +201,7 @@ export function ActivityScreen() {
   });
   const restore = useMutation({
     mutationFn: (activityId: string) => api.restoreActivity(id, activityId),
-    onSuccess: applyPlan,
+    onSuccess: (activity, activityId) => applyPlan(activity, activityId),
   });
 
   const activity = group.data?.activity ?? null;
@@ -264,6 +270,8 @@ export function ActivityScreen() {
           />
         </>
       ) : null}
+
+      {group.data && !isGenerating ? <TimesCard groupId={id} group={group.data} /> : null}
 
       {history.length > 0 ? (
         <View className="gap-3 pt-2">

@@ -1,6 +1,7 @@
 // Owner: Pranav (Groups, Activities & Chat) — see docs/ROLES.md.
 // CHANGED Sep 26: restyled to ember/paper; chat now goes read-only 24h after the hangout is marked
 // done (see GroupScreen's "Mark hangout as done") — see docs/ARCHITECTURE.md.
+// CHANGED Sep 26 (wave 5, Sahith): the header is the group's name (hangoutTitle), not "Group chat".
 import type { Message } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
 import { Stack, useLocalSearchParams } from 'expo-router';
@@ -16,7 +17,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { firstName } from '@/features/groups/degrees';
+import { firstName, hangoutTitle } from '@/features/groups/degrees';
 import { useGroup } from '@/features/groups/queries';
 import { ErrorState, LoadingState, Muted } from '@/components/ui';
 import { useMessages } from './useMessages';
@@ -69,7 +70,7 @@ export function ChatScreen() {
       style={{ flex: 1 }}
       className="bg-paper"
     >
-      <Stack.Screen options={{ title: 'Group chat' }} />
+      <Stack.Screen options={{ title: hangoutTitle(group.data) }} />
       {messages.isPending ? <LoadingState label="Loading messages…" /> : null}
       {messages.isError ? (
         <View className="p-5">

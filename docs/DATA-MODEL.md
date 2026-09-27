@@ -202,15 +202,44 @@ event_photos (
 
 -- Client-readable (RLS: user_id = auth.uid()), server-written only. In the
 -- Realtime publication like messages, so the client subscribes rather than polls.
+-- wave 5 (0012): rows are finally written (apps/server/src/lib/notify.ts), indexed on
+-- (user_id, created_at desc); marking read goes through POST /api/notifications/read.
 notifications (
   id                uuid primary key,
   user_id           uuid references profiles,
   type              text not null,   -- hangout_invited | hangout_forming | message_received |
                                       -- feedback_prompt | exchange_requested | exchange_accepted |
-                                      -- connection_added
+                                      -- connection_added | event_changed (wave 5)
   payload           jsonb not null default '{}',
   read              boolean not null default false,
   created_at        timestamptz default now()
+)
+
+-- wave 5 (0012) -------------------------------------------------------------
+
+-- profiles.notification_settings jsonb not null default '{}'
+--   per-kind toggles { hangouts, exchange, met, changes }; a missing key means on.
+--   Not client-readable (0005's column list); served by GET /api/me, set by PUT /api/notifications/settings.
+
+-- When the plan happens. The calendar moved off "Host a meetup" onto the generated plan: members propose
+-- times, mark which they're free for, and any member locks one in — that writes groups.scheduled_at (0007).
+-- Readable by group members (so Realtime reaches everyone in the group); written only by the server.
+group_times (
+  id            uuid primary key,
+  group_id      uuid references groups not null,
+  proposed_by   uuid references profiles,
+  starts_at     timestamptz not null,   -- rounded to the minute
+  note          text,
+  created_at    timestamptz default now(),
+  unique (group_id, starts_at)
+)
+
+group_time_votes (
+  time_id       uuid references group_times not null,
+  group_id      uuid references groups not null,   -- denormalised so RLS + the Realtime filter are a column check
+  user_id       uuid references profiles not null,
+  created_at    timestamptz default now(),
+  primary key (time_id, user_id)
 )
 ```
 
@@ -250,7 +279,11 @@ notifications (
 
 **Plans are kept (wave 3).** `activities` holds every plan a group generated; the newest row is the current plan and older `ready` rows are `GroupResponse.activityHistory`. `saveActivity` deletes only `generating`/`failed` placeholders. The planner is told the previous venues so "Suggest something else" can't repeat one.
 
-**Realtime (wave 3):** `group_members` (FULL replica identity, so DELETE events carry `group_id`) and `groups` are in `supabase_realtime`, alongside `messages`, `notifications`, and `activities`. The group screen subscribes to all three with the JWT set on the socket, so a join, a leave, or "End meetup" reaches everyone already there without a refresh.
+**Realtime (wave 3):** `group_members` (FULL replica identity, so DELETE events carry `group_id`) and `groups` are in `supabase_realtime`, alongside `messages`, `notifications`, and `activities`. The group screen subscribes to all three with the JWT set on the socket, so a join, a leave, or "End meetup" reaches everyone already there without a refresh. **Wave 5:** `group_times` and `group_time_votes` join the publication (FULL replica identity) so a proposed time or a "free" tap shows for everyone on the plan screen.
+
+**Notifications are written (wave 5).** One writer, `apps/server/src/lib/notify.ts`, called from the match routes (added to a group), `confirmIfEveryoneAccepted` (group on), `POST /connections` and the end of a meetup ("we met" / N new 1st degrees), contact exchange (asked / agreed), and every change to a group or meetup (rename, time locked in, new plan, ended → `event_changed`). It reads `profiles.notification_settings` first and drops recipients who turned that kind off, and it never throws — a failed notification is a warning, not a failed request.
+
+**Plan history has no duplicates (wave 5).** `POST /groups/:id/activity/restore` moves the chosen row to the top (`created_at = now()`) rather than inserting a copy; the old copy-and-keep left the original in history, so every switch between two plans added another entry. `loadGroup` also de-duplicates history by venue + title.
 
 **Storage (wave 2, migration 0007).** Two buckets, created and policed by SQL: `event-photos` (private; objects live at `<group_id>/<file>`; `storage.objects` policies let `authenticated` insert/select only where `is_group_member(<folder>)`; the API returns signed URLs) and `avatars` (public; `<user_id>/<file>`; only the owner may insert/update/delete; the public URL is stored in `profiles.photo_url`). Avatars are public by design: the URL is unguessable and the app shows photos to groupmates and 1st-degree connections anyway.
 

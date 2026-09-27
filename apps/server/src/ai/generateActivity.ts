@@ -16,6 +16,13 @@
 //       done
 //
 // `generateActivity()` (the whole chain in one 9s budget) remains for mock mode and tests.
+//
+// CHANGED Sep 26 (wave 5, Sahith): the plan actually has to fit the group's preferences. Testing showed distance
+// and price flatly ignored — the prompt mentioned them once and nothing checked the result. Now: cost and
+// distance are HARD CONSTRAINTS in the prompt (with the centre coordinates), shared interests are called out,
+// the assembled plan is REJECTED if it's farther than maxTravelMi (+15%) or dearer than maxCostCents, and a
+// constraint rejection sends the job back to the grounded stage with the rejection in the prompt (up to two
+// times) before falling through to Lite / Ticketmaster / fixture.
 import { z } from 'zod';
 import {
   activitySchema,
@@ -93,12 +100,64 @@ export const activityJobSchema = z.object({
   // Set while an advance is running so a concurrent poll returns the current state instead of doing the work twice.
   lockedUntil: z.iso.datetime().optional(),
   errors: z.array(z.string()).default([]),
+  // wave 5: plans the constraints threw out, fed back into the next grounded attempt (max MAX_REJECTIONS).
+  rejected: z.array(z.object({ venue: z.string(), reason: z.string() })).default([]),
 });
 export type ActivityJob = z.infer<typeof activityJobSchema>;
 
 export function newActivityJob(now = new Date()): ActivityJob {
   const iso = now.toISOString();
-  return { stage: 'grounded', startedAt: iso, updatedAt: iso, errors: [] };
+  return { stage: 'grounded', startedAt: iso, updatedAt: iso, errors: [], rejected: [] };
+}
+
+// How many constraint rejections get a fresh grounded attempt before the job falls through the chain.
+export const MAX_REJECTIONS = 2;
+// A venue may sit this far past maxTravelMi and still count as "within" it (Places vs. driving distance noise).
+const TRAVEL_SLACK = 1.15;
+
+// wave 5: thrown when a plan breaks a preference or a rule — the stage runner treats these as "try again with
+// this in the prompt" rather than "move on to the next source".
+export class ConstraintError extends Error {
+  constructor(
+    public readonly venue: string,
+    public readonly reason: string,
+  ) {
+    super(`Plan rejected: "${venue}" — ${reason}`);
+    this.name = 'ConstraintError';
+  }
+}
+
+// Does an assembled plan fit the group? Null when it does, else why not (in words the next prompt can use).
+export function constraintViolation(
+  plan: { venue: string; lat: number; lng: number; priceCents: number | null },
+  input: GenerateActivityInput,
+): string | null {
+  const { lat, lng, maxTravelMi, maxCostCents } = input.constraints;
+  const miles = milesBetween({ lat, lng }, { lat: plan.lat, lng: plan.lng });
+  if (miles > maxTravelMi * TRAVEL_SLACK) {
+    return `${miles.toFixed(1)} miles away, but the group's limit is ${maxTravelMi} miles`;
+  }
+  if (plan.priceCents !== null && plan.priceCents > maxCostCents) {
+    return `about $${(plan.priceCents / 100).toFixed(0)} per person, but the group's budget is $${(maxCostCents / 100).toFixed(0)}`;
+  }
+  return null;
+}
+
+// Interests two or more members share (case-insensitive, first spelling kept), most shared first. Falls back to
+// everyone's interests when nothing overlaps, so the planner always has tags to work from.
+export function sharedInterests(input: GenerateActivityInput): string[] {
+  const counts = new Map<string, { label: string; count: number }>();
+  for (const member of input.members) {
+    for (const label of new Set(member.interests.map((l) => l.trim()).filter(Boolean))) {
+      const key = label.toLowerCase();
+      const entry = counts.get(key) ?? { label, count: 0 };
+      entry.count += 1;
+      counts.set(key, entry);
+    }
+  }
+  const shared = [...counts.values()].filter(({ count }) => count >= 2).sort((a, b) => b.count - a.count);
+  const pool = shared.length > 0 ? shared : [...counts.values()];
+  return pool.map(({ label }) => label);
 }
 
 const eventPickSchema = z.object({
@@ -181,14 +240,14 @@ export function violatesAvoids(venueOrTitle: string, input: GenerateActivityInpu
   return null;
 }
 
-function describeGroup(input: GenerateActivityInput): string {
+function describeGroup(input: GenerateActivityInput, rejections: ActivityJob['rejected'] = []): string {
   const members = input.members
     .map(
       ({ displayName, interests }) =>
         `- ${displayName}: ${interests.length > 0 ? interests.join(', ') : 'no interests listed'}`,
     )
     .join('\n');
-  const { maxCostCents, maxTravelMi, city } = input.constraints;
+  const { maxCostCents, maxTravelMi, city, lat, lng } = input.constraints;
   const rules = avoidRules(input);
   const avoidBlock =
     rules.length > 0
@@ -198,10 +257,21 @@ function describeGroup(input: GenerateActivityInput): string {
     input.previousVenues.length > 0
       ? `\n\nAlready suggested to this group — do NOT pick any of these again, and prefer a different kind of activity from them: ${input.previousVenues.join('; ')}.`
       : '';
+  const rejected =
+    rejections.length > 0
+      ? `\n\nRejected — do not pick these or anything like them: ${rejections.map(({ venue, reason }) => `${venue} (${reason})`).join('; ')}.`
+      : '';
+  const shared = sharedInterests(input);
+  const interestsLine =
+    shared.length > 0
+      ? `\n\nShared interests (pick something that fits at least two of these, and say which): ${shared.join(', ')}.`
+      : '';
   return `Group (${input.members.length} people, meeting in person, most of them just met):
-${members}
+${members}${interestsLine}
 
-Constraints: at most $${(maxCostCents / 100).toFixed(0)} per person, within ${maxTravelMi} miles, in or near ${city}.${avoidBlock}${previous}`;
+HARD CONSTRAINTS — these are the group's own settings and a plan outside them is wrong:
+- DISTANCE: at most ${maxTravelMi} miles from (${lat.toFixed(4)}, ${lng.toFixed(4)}) in ${city} — check the driving distance from that point, not the city name.
+- COST: at most $${(maxCostCents / 100).toFixed(0)} per person INCLUDING the activity itself (tickets, lane, session, food if it's the plan), not just entry.${avoidBlock}${previous}${rejected}`;
 }
 
 // Same loose comparison assembleFromMaps uses, so "Your 3rd Spot - Westside" still counts as "Your 3rd Spot".
@@ -231,15 +301,16 @@ async function groundedPlanWith(
   model: string,
   input: GenerateActivityInput,
   abortSignal: AbortSignal,
+  rejections: ActivityJob['rejected'] = [],
 ): Promise<{ plan: GroundedPlan; places: CitedPlace[] }> {
   const { lat, lng } = input.constraints;
   const response = await getAiClient().models.generateContent({
     model,
     contents: `You plan real-world hangouts for small groups of college students who want to become friends.
 
-${describeGroup(input)}
+${describeGroup(input, rejections)}
 
-Use Google Maps to choose ONE real, currently open venue for a low-pressure activity that most of the group would enjoy together — something to do, not just somewhere to sit. Respect the budget and distance.
+Use Google Maps to choose ONE real, currently open venue for a low-pressure activity that most of the group would enjoy together — something to do, not just somewhere to sit. The distance and cost limits above are the group's own settings: verify both before answering, and if your first idea breaks one, pick another.
 
 Reply with only a JSON object, no prose:
 {"venue": "<exact Google Maps name of the venue>", "title": "<short plan title, e.g. 'Bouldering + tacos after'>", "estimatedPricePerPersonUsd": <number or null>, "reasoning": "<one or two friendly sentences naming which members' interests this fits>", "address": "<street address>", "lat": <number>, "lng": <number>}`,
@@ -254,10 +325,17 @@ Reply with only a JSON object, no prose:
   const plan = groundedPlanSchema.parse(extractJson(response.text ?? ''));
   const violation = violatesAvoids(`${plan.venue} ${plan.title}`, input);
   if (violation) {
-    throw new Error(`Plan breaks an avoid rule: ${violation}`);
+    throw new ConstraintError(plan.venue, `breaks an avoid rule: ${violation}`);
   }
   if (isPreviousVenue(plan.venue, input)) {
-    throw new Error(`Plan repeats an earlier venue: "${plan.venue}".`);
+    throw new ConstraintError(plan.venue, 'already suggested to this group');
+  }
+  // The model's own estimate is checked here too, so an over-budget pick never costs a Places call.
+  if (typeof plan.estimatedPricePerPersonUsd === 'number' && Math.round(plan.estimatedPricePerPersonUsd * 100) > input.constraints.maxCostCents) {
+    throw new ConstraintError(
+      plan.venue,
+      `about $${plan.estimatedPricePerPersonUsd.toFixed(0)} per person, but the group's budget is $${(input.constraints.maxCostCents / 100).toFixed(0)}`,
+    );
   }
   const places = (
     response.candidates?.[0]?.groundingMetadata?.groundingChunks ?? []
@@ -326,17 +404,17 @@ async function assembleFromMaps(
     );
   }
 
-  // Without Places, accept the model's own coordinates only if they land within a sane distance.
+  // Without Places, accept the model's own coordinates only if they land inside the group's range (wave 5: this
+  // used to allow 2x the limit or 15 miles, whichever was larger — one of the ways distance got ignored).
   const modelLocation =
     typeof plan.lat === 'number' &&
     typeof plan.lng === 'number' &&
-    milesBetween(center, { lat: plan.lat, lng: plan.lng }) <=
-      Math.max(center.maxTravelMi * 2, 15)
+    milesBetween(center, { lat: plan.lat, lng: plan.lng }) <= center.maxTravelMi * TRAVEL_SLACK
       ? { lat: plan.lat, lng: plan.lng }
       : null;
   const location = place ?? modelLocation;
   if (!location) {
-    throw new Error(`No coordinates for "${plan.venue}".`);
+    throw new ConstraintError(plan.venue, `no location inside the group's ${center.maxTravelMi}-mile range`);
   }
 
   const estimate =
@@ -344,7 +422,7 @@ async function assembleFromMaps(
     plan.estimatedPricePerPersonUsd === undefined
       ? null
       : Math.round(plan.estimatedPricePerPersonUsd * 100);
-  return activitySchema.parse({
+  const activity = activitySchema.parse({
     title: plan.title,
     venue: place?.name || plan.venue,
     address: place?.address || plan.address || center.city,
@@ -357,6 +435,12 @@ async function assembleFromMaps(
     sourceUrl: place?.mapsUri ?? cited?.uri ?? null,
     reasoning: plan.reasoning,
   });
+  // wave 5: the resolved venue has to fit the group's range and budget, whatever the model claimed.
+  const violation = constraintViolation(activity, input);
+  if (violation) {
+    throw new ConstraintError(activity.venue, violation);
+  }
+  return activity;
 }
 
 async function fromMaps(
@@ -428,6 +512,8 @@ async function fromTicketmaster(
   ).filter(
     (event) =>
       (event.minPriceCents === null || event.minPriceCents <= maxCostCents) &&
+      // wave 5: the API's radius is a hint; measure it.
+      milesBetween({ lat, lng }, { lat: event.lat, lng: event.lng }) <= maxTravelMi * TRAVEL_SLACK &&
       !isPreviousVenue(event.venue, input) &&
       !input.previousVenues.some((previous) => normalizeName(previous) === normalizeName(event.name)) &&
       violatesAvoids(`${event.name} ${event.venue}`, input) === null,
@@ -510,13 +596,26 @@ export async function runActivityStage(
   const stage = job.stage;
   const fail = (error: unknown): StageResult => {
     const message = error instanceof Error ? error.message : String(error);
+    const errors = [...job.errors, `${stage}: ${message}`].slice(-8);
+    // wave 5: a plan that broke a preference gets another grounded attempt with the rejection in the prompt,
+    // rather than handing the group a Ticketmaster event (or the fixture) for a limit the model can meet.
+    if (
+      error instanceof ConstraintError &&
+      (stage === 'grounded' || stage === 'grounded_lite' || stage === 'places') &&
+      job.rejected.length < MAX_REJECTIONS
+    ) {
+      const rejected = [...job.rejected, { venue: error.venue, reason: error.reason }];
+      log.warn('activity.stage.rejected', { stage, venue: error.venue, reason: error.reason, attempt: rejected.length });
+      const { plan: _plan, places: _places, ...rest } = job;
+      return { job: { ...rest, stage: 'grounded', updatedAt: now(), errors, rejected }, activity: null };
+    }
     log.warn('activity.stage.failed', { stage, next: NEXT_ON_FAILURE[stage], message });
     return {
       job: {
         ...job,
         stage: NEXT_ON_FAILURE[stage],
         updatedAt: now(),
-        errors: [...job.errors, `${stage}: ${message}`].slice(-8),
+        errors,
       },
       activity: null,
     };
@@ -532,7 +631,7 @@ export async function runActivityStage(
       case 'grounded':
       case 'grounded_lite': {
         const model = stage === 'grounded' ? FLASH_MODEL : FLASH_LITE_MODEL;
-        const { plan, places } = await groundedPlanWith(model, input, timeoutSignal(budget()));
+        const { plan, places } = await groundedPlanWith(model, input, timeoutSignal(budget()), job.rejected);
         return { job: { ...job, stage: 'places', plan, places, updatedAt: now() }, activity: null };
       }
       case 'places': {

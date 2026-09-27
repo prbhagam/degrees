@@ -1,10 +1,12 @@
 // Owner: Christian (Server & Infra) — periodic batch matching for admin demo trigger.
+// CHANGED Sep 26 (wave 5, Sahith): members of each created group are notified (hangout_invited).
 import type { UpdatePreferencesRequest } from '@degrees/shared';
 import { env } from '../config/env.js';
 import { getServiceClient } from '../db/supabase.js';
 import { profileBasics } from '../lib/graph.js';
 import { redactReasoning } from '../lib/groups.js';
 import { log, timed } from '../lib/log.js';
+import { notify } from '../lib/notify.js';
 import { firstMissingStep, loadProfileStatus } from '../lib/profileStatus.js';
 import { fallbackGroup, formGroups } from './formGroups.js';
 import { narrow, type NarrowedCandidate } from './narrow.js';
@@ -199,6 +201,11 @@ export async function matchUserMultiGroups(
 
     if (!createError && typeof createdGroupId === 'string') {
       groupIds.push(createdGroupId);
+      // wave 5: everyone (the requester included — batch matching happens without them asking) hears about it.
+      await notify(formed.memberIds, 'hangout_invited', {
+        groupId: createdGroupId,
+        memberCount: formed.memberIds.length,
+      });
     }
   }
 

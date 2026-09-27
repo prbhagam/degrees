@@ -1,7 +1,9 @@
 // Owner: Pranav (Groups, Activities & Chat) — how degrees of separation read and look in the UI.
 // CHANGED Sep 26: members past 1st degree are redacted server-side (no name, no `via` chain) —
 // you only ever see three states: you, someone you've met, or someone you haven't met yet.
-import type { GroupMember } from '@degrees/shared';
+// CHANGED Sep 26 (wave 5, Sahith): hangoutTitle() — one title for the group screen, the chat header, and the
+// Chats tab, so "Group chat" is never the header when the group has a name.
+import type { GroupMember, GroupResponse } from '@degrees/shared';
 
 interface DegreeStyle {
   label: string;
@@ -65,4 +67,20 @@ export function memberDisplayName(
 
 export function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? name;
+}
+
+// Added Sep 26 (wave 5): what a group is called wherever it appears. The saved name wins; otherwise the people
+// you can see, then how many you can't; 'Your group' only when nothing else is known.
+export function hangoutTitle(
+  data: Pick<GroupResponse, 'name' | 'members' | 'unrevealedCount' | 'kind'> | null | undefined,
+): string {
+  if (!data) return data === null ? 'Your group' : 'Chat';
+  if (data.name) return data.name;
+  const revealedOthers = data.members.filter((member) => member.degree !== 0 && member.revealed);
+  if (revealedOthers.length > 0) {
+    const names = revealedOthers.map((member) => firstName(member.displayName ?? 'Someone')).join(', ');
+    return `You + ${names}${data.unrevealedCount > 0 ? ` + ${data.unrevealedCount} more` : ''}`;
+  }
+  if (data.unrevealedCount > 0) return `You + ${data.unrevealedCount} new people`;
+  return data.kind === 'meetup' ? 'Meetup' : 'Your group';
 }

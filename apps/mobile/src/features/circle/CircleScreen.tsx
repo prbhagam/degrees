@@ -2,13 +2,14 @@
 // ("the strongest answer to 'is this social media?'"); this assigns and builds it.
 // Only ever shows 1st-degree connections (people actually met) — never the wider matching pool.
 // CHANGED Sep 26 (wave 3): contact exchange lives here (saved server-side, POST /graph/exchange).
-// CHANGED Sep 26 (wave 4): back to "Your circle" (the tab header carries the title, so the page doesn't repeat it);
-// a third view, Play — drag yourself around and bump into people (BumpPlayground.tsx).
-import { Fragment, useState } from 'react';
+// CHANGED Sep 26 (wave 4): back to "Your circle" (the tab header carries the title, so the page doesn't repeat it).
+// CHANGED Sep 26 (wave 5, Sahith): Play folded into Map. The map is now the physics graph (CircleGraph.tsx): drag
+// anyone, fling them, watch the people who know each other pull together and the rest get pushed aside; tap to
+// select. The static SVG map and the separate Play toggle are gone.
+import { useState } from 'react';
 import { Stack } from 'expo-router';
 import * as Linking from 'expo-linking';
-import Svg, { Circle, Line, Text as SvgText } from 'react-native-svg';
-import { Pressable, RefreshControl, Text, View } from 'react-native';
+import { Pressable, RefreshControl, Text, useWindowDimensions, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatUsPhone, type GraphResponse } from '@degrees/shared';
 import { MessageSquare, Phone } from 'lucide-react-native';
@@ -16,15 +17,13 @@ import { Avatar, Button, ErrorState, LoadingState, Muted, Screen } from '@/compo
 import { queryKeys, useMe } from '@/features/groups/queries';
 import { api } from '@/lib/api';
 import { LIVE_POLL_MS, usePullToRefresh } from '@/lib/query';
-import { BumpPlayground } from './BumpPlayground';
+import { CircleGraph } from './CircleGraph';
 
-type Mode = 'list' | 'map' | 'play';
+type Mode = 'list' | 'map';
 type Node = GraphResponse['nodes'][number];
-
-function polarPosition(index: number, total: number, radius: number, center: number) {
-  const angle = (index / total) * 2 * Math.PI - Math.PI / 2;
-  return { x: center + radius * Math.cos(angle), y: center + radius * Math.sin(angle) };
-}
+// Screen padding on each side (ui.tsx Screen: p-5).
+const SCREEN_PAD = 20;
+const GRAPH_HEIGHT = 340;
 
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] ?? name;
@@ -132,29 +131,27 @@ function PersonCard({ node, expanded, onPress }: { node: Node; expanded: boolean
 const MODES: { value: Mode; label: string }[] = [
   { value: 'list', label: 'List' },
   { value: 'map', label: 'Map' },
-  { value: 'play', label: 'Play' },
 ];
 
 export function CircleScreen() {
   const [mode, setMode] = useState<Mode>('list');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [bumped, setBumped] = useState<{ name: string; count: number } | null>(null);
+  const { width: windowWidth } = useWindowDimensions();
   const me = useMe();
   // Wave 2: polls once a minute while focused (new "We met" taps land here) and pulls to refresh.
   const graph = useQuery({ queryKey: queryKeys.graph, queryFn: api.getGraph, refetchInterval: LIVE_POLL_MS });
   const pull = usePullToRefresh(graph.refetch);
 
   const nodes = graph.data?.nodes ?? [];
-  const size = 320;
-  const center = size / 2;
-  const positions = new Map(nodes.map((node, i) => [node.id, polarPosition(i, nodes.length || 1, 120, center)]));
   const selected = nodes.find((node) => node.id === selectedId) ?? null;
   const toggle = (id: string) => setSelectedId((current) => (current === id ? null : id));
 
   return (
     <Screen
-      // The playground owns its touches; a scroll view fighting the drag would make bumping feel sticky.
-      scrollEnabled={mode !== 'play'}
-      refreshControl={mode === 'play' ? undefined : <RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />}
+      // The graph owns its touches; a scroll view fighting the drag would make it feel sticky.
+      scrollEnabled={mode !== 'map'}
+      refreshControl={mode === 'map' ? undefined : <RefreshControl refreshing={pull.refreshing} onRefresh={pull.onRefresh} />}
     >
       <Stack.Screen options={{ title: 'Your circle' }} />
 
@@ -193,56 +190,31 @@ export function CircleScreen() {
       ) : null}
 
       {graph.data && mode === 'map' ? (
-        <View className="mt-2 items-center">
-          <Svg width={size} height={size}>
-            {nodes.map((node) => {
-              const pos = positions.get(node.id)!;
-              return <Line key={`spoke-${node.id}`} x1={center} y1={center} x2={pos.x} y2={pos.y} stroke="#E4DDD0" strokeWidth={1.5} />;
-            })}
-            {graph.data.mutualEdges.map((edge, i) => {
-              const a = positions.get(edge.a);
-              const b = positions.get(edge.b);
-              if (!a || !b) return null;
-              return <Line key={`mutual-${i}`} x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="#5B7A6B" strokeWidth={2} />;
-            })}
-            <Circle cx={center} cy={center} r={24} fill="#E8703A" />
-            <SvgText x={center} y={center + 4} fontSize={11} fontWeight="700" fill="#F7F3EC" textAnchor="middle">
-              0°
-            </SvgText>
-            {nodes.map((node) => {
-              const pos = positions.get(node.id)!;
-              const initials = node.displayName
-                .split(' ')
-                .map((part) => part[0])
-                .join('')
-                .toUpperCase();
-              return (
-                <Fragment key={node.id}>
-                  <Circle
-                    cx={pos.x}
-                    cy={pos.y}
-                    r={19}
-                    fill="#FFFFFF"
-                    stroke="#20201C"
-                    strokeWidth={1.5}
-                    onPress={() => toggle(node.id)}
-                  />
-                  <SvgText
-                    x={pos.x}
-                    y={pos.y + 4}
-                    fontSize={11}
-                    fontWeight="700"
-                    fill="#20201C"
-                    textAnchor="middle"
-                    onPress={() => toggle(node.id)}
-                  >
-                    {initials}
-                  </SvgText>
-                </Fragment>
-              );
-            })}
-          </Svg>
-          <View className="mt-3 gap-1.5">
+        <View className="mt-1 items-center">
+          <CircleGraph
+            nodes={nodes}
+            mutualEdges={graph.data.mutualEdges}
+            width={windowWidth - SCREEN_PAD * 2}
+            height={GRAPH_HEIGHT}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onBump={(name) => setBumped((current) => ({ name, count: (current?.count ?? 0) + 1 }))}
+          />
+          <View className="mt-2 min-h-10 items-center">
+            {nodes.length === 0 ? (
+              <Muted>Just you for now — meet someone in person and they'll appear here.</Muted>
+            ) : bumped ? (
+              <>
+                <Text className="font-display-medium text-base text-ink">You bumped into {firstName(bumped.name)}</Text>
+                <Muted>
+                  {bumped.count} {bumped.count === 1 ? 'bump' : 'bumps'} · drag anyone, fling them, tap to open
+                </Muted>
+              </>
+            ) : (
+              <Muted>Drag anyone. People who know each other stick together.</Muted>
+            )}
+          </View>
+          <View className="mt-1 w-full flex-row flex-wrap justify-center gap-x-5 gap-y-1">
             <View className="flex-row items-center gap-2">
               <View className="h-0.5 w-4 bg-line" />
               <Muted>Connected through you</Muted>
@@ -253,21 +225,11 @@ export function CircleScreen() {
             </View>
           </View>
           {selected ? (
-            <View className="mt-4 w-full">
+            <View className="mt-3 w-full">
               <PersonCard node={selected} expanded onPress={() => setSelectedId(null)} />
             </View>
           ) : null}
         </View>
-      ) : null}
-
-      {graph.data && mode === 'play' ? (
-        nodes.length === 0 ? (
-          <Muted className="mt-2">Nobody to bump into yet — meet someone first.</Muted>
-        ) : (
-          <View className="mt-2">
-            <BumpPlayground nodes={nodes} />
-          </View>
-        )
       ) : null}
     </Screen>
   );

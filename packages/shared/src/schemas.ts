@@ -230,7 +230,53 @@ export const notificationTypeSchema = z.enum([
   'exchange_requested',
   'exchange_accepted',
   'connection_added',
+  // Added Sep 26 (wave 5): something about a meetup or group you're in changed — renamed, a time was locked in,
+  // the plan changed, or it ended. payload.change says which.
+  'event_changed',
 ]);
+
+// ---- Added Sep 26 (wave 5): notification settings --------------------------------------------
+// One toggle per kind of notification the server actually writes. Stored as profiles.notification_settings
+// (jsonb); a missing key means on. message_received and feedback_prompt have no writer yet, so no toggle.
+export const notificationSettingsSchema = z.object({
+  // hangout_invited (added to a new group) + hangout_forming (everyone said yes)
+  hangouts: z.boolean(),
+  // exchange_requested + exchange_accepted
+  exchange: z.boolean(),
+  // connection_added (someone tapped "We met", or a meetup ended and connected you)
+  met: z.boolean(),
+  // event_changed (rename, time locked in, new plan, ended)
+  changes: z.boolean(),
+});
+export const updateNotificationSettingsRequestSchema = notificationSettingsSchema.partial();
+export const DEFAULT_NOTIFICATION_SETTINGS = {
+  hangouts: true,
+  exchange: true,
+  met: true,
+  changes: true,
+} as const satisfies z.infer<typeof notificationSettingsSchema>;
+// Which toggle governs each type; null = always delivered (nothing writes these today anyway).
+export const NOTIFICATION_SETTING_FOR = {
+  hangout_invited: 'hangouts',
+  hangout_forming: 'hangouts',
+  message_received: null,
+  feedback_prompt: null,
+  exchange_requested: 'exchange',
+  exchange_accepted: 'exchange',
+  connection_added: 'met',
+  event_changed: 'changes',
+} as const satisfies Record<z.infer<typeof notificationTypeSchema>, keyof z.infer<typeof notificationSettingsSchema> | null>;
+
+// ---- Added Sep 26 (wave 5): when a plan happens -------------------------------------------------
+// The calendar moved off "Host a meetup" (you're already with those people) onto the generated plan: members
+// propose times, say which they're free for, and any member locks one in (groups.scheduled_at).
+export const proposeTimeRequestSchema = z.object({
+  startsAt: z.iso.datetime(),
+  note: z.string().trim().max(120).optional(),
+});
+export const timeVoteRequestSchema = z.object({
+  available: z.boolean(),
+});
 
 // ---- Added Sep 26 (wave 3): contact exchange between 1st-degree connections (Your Circle) ----
 // Same mutual-consent rule as the per-group exchange, keyed on the connection pair instead of a group, so the
