@@ -1,11 +1,11 @@
 // Owner: shared mobile scaffold (Charles). The animated splash: paper background, starting completely blank —
 // no logo, nothing drawn (app.json's native splash is blank too, so there's no pop at handoff). A cursor blinks,
-// then the "d" strikes in at full size in one instant (opacity snaps in, a quick spring-bounce sells the
-// "keystroke"), the cursor jumps to the ring's spot and blinks there, then the ring strikes in the same way —
-// the mark itself is what's "typed" (there's only ever one logo on screen, never separate caption text). Once
-// both are struck, that's exactly DegreesMark's resting pose, so the swap to <DegreesMark animated loop={false}>
-// is pixel-for-pixel: it runs its shrink/grow/orbit cycle once, then the whole thing lifts to reveal the app
-// underneath. Runs once per cold start; never blocks — the app renders from frame one.
+// then the "d" strikes in at full size in a single instant (opacity 0->1 with no animation, no scale, no bounce
+// — a real keystroke doesn't ease in), the cursor jumps to the ring's spot and blinks there, then the ring
+// strikes in the same way — the mark itself is what's "typed" (there's only ever one logo on screen, never
+// separate caption text). Once both are struck, that's exactly DegreesMark's resting pose, so the swap to
+// <DegreesMark animated loop={false}> is pixel-for-pixel: it runs its shrink/grow/orbit cycle once, then the
+// whole thing lifts to reveal the app underneath. Runs once per cold start; never blocks.
 import { useCallback, useEffect, useState } from 'react';
 import { Image, StyleSheet } from 'react-native';
 import Animated, {
@@ -16,7 +16,6 @@ import Animated, {
   withDelay,
   withRepeat,
   withSequence,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { DegreesMark, D_POSE, RING_TOPRIGHT, INK, EMBER } from './DegreesMark';
@@ -42,9 +41,7 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
   };
 
   const dOpacity = useSharedValue(0);
-  const dScale = useSharedValue(1.5);
   const ringOpacity = useSharedValue(0);
-  const ringScale = useSharedValue(1.5);
   const cursorAtRing = useSharedValue(0); // 0: waiting at the d's spot, 1: waiting at the ring's spot
   const cursorBlink = useSharedValue(1);
   const typingOpacity = useSharedValue(1);
@@ -55,13 +52,11 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
       withSequence(withTiming(1, { duration: 0 }), withDelay(430, withTiming(0, { duration: 0 })), withDelay(430, withTiming(1, { duration: 0 }))),
       -1,
     );
-    // Struck all at once, like a keystroke: opacity snaps in and a quick overshoot spring sells the "click".
-    dOpacity.value = withDelay(CURSOR_LEAD_MS, withTiming(1, { duration: 1 }));
-    dScale.value = withDelay(CURSOR_LEAD_MS, withSpring(1, { damping: 9, stiffness: 280 }));
+    // Struck all at once, like a keystroke: opacity jumps 0->1 with no animation at all.
+    dOpacity.value = withDelay(CURSOR_LEAD_MS, withTiming(1, { duration: 0 }));
     cursorAtRing.value = withDelay(CURSOR_LEAD_MS, withTiming(1, { duration: 0 }));
 
-    ringOpacity.value = withDelay(CURSOR_LEAD_MS + GAP_MS, withTiming(1, { duration: 1 }));
-    ringScale.value = withDelay(CURSOR_LEAD_MS + GAP_MS, withSpring(1, { damping: 9, stiffness: 280 }));
+    ringOpacity.value = withDelay(CURSOR_LEAD_MS + GAP_MS, withTiming(1, { duration: 0 }));
 
     const t = setTimeout(() => {
       typingOpacity.value = withTiming(0, { duration: 150 });
@@ -87,8 +82,8 @@ export function AnimatedSplash({ onDone }: { onDone: () => void }) {
     transform: [{ translateY: -lift.value * 60 }, { scale: 1 - lift.value * 0.15 }],
   }));
   const typingStyle = useAnimatedStyle(() => ({ opacity: typingOpacity.value }));
-  const dStyle = useAnimatedStyle(() => ({ opacity: dOpacity.value, transform: [{ scale: dScale.value }] }));
-  const ringStyle = useAnimatedStyle(() => ({ opacity: ringOpacity.value, transform: [{ scale: ringScale.value }] }));
+  const dStyle = useAnimatedStyle(() => ({ opacity: dOpacity.value }));
+  const ringStyle = useAnimatedStyle(() => ({ opacity: ringOpacity.value }));
   const cursorStyle = useAnimatedStyle(() => {
     const box = cursorAtRing.value > 0.5 ? RING_TOPRIGHT : D_POSE;
     return {

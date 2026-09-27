@@ -17,6 +17,11 @@
 // Colour is always a static prop, never animated through useAnimatedStyle: Reanimated's fast path doesn't
 // reliably drive Image#tintColor per frame, so every element keeps one fixed tint for its whole lifetime and
 // the gradient is an illusion of the crossfade.
+//
+// Every useAnimatedStyle below is fully self-contained (no shared helper function that itself calls a hook, no
+// worklet calling another worklet for the *whole* computation) — some math is repeated between the two
+// transitional styles as a result. That's deliberate: keep this file boringly literal so there's nothing subtle
+// for the animation to fail to pick up.
 import { useEffect } from 'react';
 import { Image, View } from 'react-native';
 import Animated, {
@@ -54,15 +59,7 @@ const TOPRIGHT_ANGLE = (Math.atan2(RING_DY, RING_DX) * 180) / Math.PI;
 // The park spot is the point opposite the ring's resting spot on that same circle — a half-orbit away.
 const PARK_ANGLE = TOPRIGHT_ANGLE + 180;
 
-// Plain (non-worklet) version for the module-scope math below — called at import time, before any Reanimated
-// UI-runtime context exists, so it must not carry the 'worklet' directive.
 function polarBoxPlain(cx: number, cy: number, radius: number, angleDeg: number, itemSize: number) {
-  const rad = (angleDeg * Math.PI) / 180;
-  return { left: cx + radius * Math.cos(rad) - itemSize / 2, top: cy + radius * Math.sin(rad) - itemSize / 2, width: itemSize, height: itemSize };
-}
-
-function polarBox(cx: number, cy: number, radius: number, angleDeg: number, itemSize: number) {
-  'worklet';
   const rad = (angleDeg * Math.PI) / 180;
   return { left: cx + radius * Math.cos(rad) - itemSize / 2, top: cy + radius * Math.sin(rad) - itemSize / 2, width: itemSize, height: itemSize };
 }
@@ -76,12 +73,9 @@ const RING_GROWN = { left: D_CENTER.x - D_POSE.height / 2, top: D_CENTER.y - D_P
 
 const MORPH_MS = 900;
 const SETTLE_MS = 400;
-const EASE = Easing.inOut(Easing.cubic);
 // The morph is two distinct beats, not one blended crossfade: first the departing shape physically moves and
 // shrinks/grows at FULL opacity (nothing else on screen to dilute it, so the motion is unmistakable) — only
 // once it's finished travelling does it fade out, while the arriving shape fades in at its fixed destination.
-// A single continuous move+fade made the two cancel out visually (a moving-but-fading shape next to a
-// fading-in duplicate reads as "nothing happened"); this way there's always exactly one clear thing to look at.
 const MOVE_FRACTION = 0.6;
 
 export function DegreesMark({
@@ -119,58 +113,88 @@ export function DegreesMark({
     }
   }, [animated, loop, master, onDone, totalMs]);
 
-  const px = (frac: number) => {
-    'worklet';
-    return frac * size;
-  };
-  // moveT: eased 0..1 over the first MOVE_FRACTION of the morph, then held at 1 — drives the departing shape's
-  // box. It travels at full opacity (see useTransitionalStyle), so the motion itself is never diluted.
-  const moveT = () => {
+  // Transitional: the old ink d, moving from D_POSE to the park spot at full opacity, then fading out.
+  const dShrinkingStyle = useAnimatedStyle(() => {
     'worklet';
     const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
-    return EASE(interpolate(raw, [0, MOVE_FRACTION], [0, 1], Extrapolation.CLAMP));
-  };
-  // fadeT: 0 until the move finishes, then eases 0..1 over the remainder of the morph. Drives the departing
-  // shape's fade-out (1 - fadeT) and the arriving shape's fade-in (fadeT) — one clean handoff, not a blend.
-  const fadeT = () => {
-    'worklet';
-    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
-    return EASE(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
-  };
-
-  // Transitional element: moves box from `from` to `to` at full opacity, THEN fades out once it arrives.
-  // Colour is fixed per element (see file header) — the gradient is the crossfade itself.
-  const useTransitionalStyle = (from: typeof D_POSE, to: typeof D_POSE) =>
-    useAnimatedStyle(() => {
-      const t = moveT();
-      return {
-        position: 'absolute',
-        left: px(from.left + t * (to.left - from.left)),
-        top: px(from.top + t * (to.top - from.top)),
-        width: px(from.width + t * (to.width - from.width)),
-        height: px(from.height + t * (to.height - from.height)),
-        opacity: 1 - fadeT(),
-      };
-    });
-  const fadeInStyle = useAnimatedStyle(() => ({ opacity: fadeT() }));
-
-  // The stable ring: fades in ember at PARK once the departing shapes finish moving, then sweeps halfway to its
-  // resting spot.
-  const ringOrbitStyle = useAnimatedStyle(() => {
-    const orbitT = EASE(interpolate(master.value, [mMorph, mOrbit], [0, 1], Extrapolation.CLAMP));
-    const angle = PARK_ANGLE - 180 * orbitT;
-    const box = polarBox(px(D_CENTER.x), px(D_CENTER.y), px(ORBIT_R), angle, px(RING_SIZE));
-    return { position: 'absolute', ...box, opacity: fadeT() };
+    const moveT = Easing.inOut(Easing.cubic)(interpolate(raw, [0, MOVE_FRACTION], [0, 1], Extrapolation.CLAMP));
+    const fadeT = Easing.inOut(Easing.cubic)(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
+    const left = D_POSE.left + moveT * (D_SHRUNK.left - D_POSE.left);
+    const top = D_POSE.top + moveT * (D_SHRUNK.top - D_POSE.top);
+    const width = D_POSE.width + moveT * (D_SHRUNK.width - D_POSE.width);
+    const height = D_POSE.height + moveT * (D_SHRUNK.height - D_POSE.height);
+    return {
+      position: 'absolute',
+      left: left * size,
+      top: top * size,
+      width: width * size,
+      height: height * size,
+      opacity: 1 - fadeT,
+    };
   });
 
-  const dShrinkingStyle = useTransitionalStyle(D_POSE, D_SHRUNK);
-  const ringGrowingStyle = useTransitionalStyle(RING_TOPRIGHT, RING_GROWN);
+  // Transitional: the old ember ring, swelling from RING_TOPRIGHT toward the d's footprint, then fading out.
+  const ringGrowingStyle = useAnimatedStyle(() => {
+    'worklet';
+    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
+    const moveT = Easing.inOut(Easing.cubic)(interpolate(raw, [0, MOVE_FRACTION], [0, 1], Extrapolation.CLAMP));
+    const fadeT = Easing.inOut(Easing.cubic)(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
+    const left = RING_TOPRIGHT.left + moveT * (RING_GROWN.left - RING_TOPRIGHT.left);
+    const top = RING_TOPRIGHT.top + moveT * (RING_GROWN.top - RING_TOPRIGHT.top);
+    const width = RING_TOPRIGHT.width + moveT * (RING_GROWN.width - RING_TOPRIGHT.width);
+    const height = RING_TOPRIGHT.height + moveT * (RING_GROWN.height - RING_TOPRIGHT.height);
+    return {
+      position: 'absolute',
+      left: left * size,
+      top: top * size,
+      width: width * size,
+      height: height * size,
+      opacity: 1 - fadeT,
+    };
+  });
+
+  // Stable: the new ink d, fixed at D_POSE, fading in once the departing shapes finish moving.
+  const dFadeInStyle = useAnimatedStyle(() => {
+    'worklet';
+    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
+    const fadeT = Easing.inOut(Easing.cubic)(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
+    return {
+      position: 'absolute',
+      left: D_POSE.left * size,
+      top: D_POSE.top * size,
+      width: D_POSE.width * size,
+      height: D_POSE.height * size,
+      opacity: fadeT,
+    };
+  });
+
+  // Stable: the new ember ring — fades in at the park spot once the departing shapes finish moving, then sweeps
+  // counterclockwise halfway round the letter to its resting spot.
+  const ringOrbitStyle = useAnimatedStyle(() => {
+    'worklet';
+    const raw = interpolate(master.value, [0, mMorph], [0, 1], Extrapolation.CLAMP);
+    const fadeT = Easing.inOut(Easing.cubic)(interpolate(raw, [MOVE_FRACTION, 1], [0, 1], Extrapolation.CLAMP));
+    const orbitT = Easing.inOut(Easing.cubic)(interpolate(master.value, [mMorph, mOrbit], [0, 1], Extrapolation.CLAMP));
+    const angle = ((PARK_ANGLE - 180 * orbitT) * Math.PI) / 180;
+    const cx = D_CENTER.x * size;
+    const cy = D_CENTER.y * size;
+    const r = ORBIT_R * size;
+    const ringSize = RING_SIZE * size;
+    return {
+      position: 'absolute',
+      left: cx + r * Math.cos(angle) - ringSize / 2,
+      top: cy + r * Math.sin(angle) - ringSize / 2,
+      width: ringSize,
+      height: ringSize,
+      opacity: fadeT,
+    };
+  });
 
   if (!animated) {
     return (
       <View style={{ width: size, height: size }}>
-        <Image source={dGlyph} resizeMode="contain" style={{ position: 'absolute', left: px(D_POSE.left), top: px(D_POSE.top), width: px(D_POSE.width), height: px(D_POSE.height) }} />
-        <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ position: 'absolute', left: px(RING_TOPRIGHT.left), top: px(RING_TOPRIGHT.top), width: px(RING_TOPRIGHT.width), height: px(RING_TOPRIGHT.height) }} />
+        <Image source={dGlyph} resizeMode="contain" style={{ position: 'absolute', left: D_POSE.left * size, top: D_POSE.top * size, width: D_POSE.width * size, height: D_POSE.height * size }} />
+        <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ position: 'absolute', left: RING_TOPRIGHT.left * size, top: RING_TOPRIGHT.top * size, width: RING_TOPRIGHT.width * size, height: RING_TOPRIGHT.height * size }} />
       </View>
     );
   }
@@ -187,7 +211,7 @@ export function DegreesMark({
         <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ width: '100%', height: '100%' }} />
       </Animated.View>
       {/* Stable: the new d, ink, fixed at D_POSE, fading in. */}
-      <Animated.View style={[{ position: 'absolute', left: px(D_POSE.left), top: px(D_POSE.top), width: px(D_POSE.width), height: px(D_POSE.height) }, fadeInStyle]}>
+      <Animated.View style={dFadeInStyle}>
         <Image source={dGlyph} resizeMode="contain" style={{ width: '100%', height: '100%' }} />
       </Animated.View>
       {/* Stable: the new ring, ember, parked then sweeping halfway home. */}
