@@ -33,9 +33,11 @@ migrations/0012_times_notification_settings.sql  wave 5 (Sahith): profiles.notif
                                          Idempotent.
 scripts/purge_demo_users.sql             removes every @degrees.demo account and its data: a real environment on demand
 scripts/restore_demo_users.sql           brings the 60 seeded demo accounts back (0002's 12 on the 0011 schema + 48 more); re-runnable
+scripts/purge_user.sql                   removes ONE account (set v_username) and every trace of it; same rules as the demo purge
 seed/seed.ts                             replaces 0002's placeholder vectors with real Gemini embeddings (`npm run seed`)
 tests/run-local.sh + matching.sql + privacy.sql   0001 + 0003–0012 on a throwaway local Postgres (with a storage shim) and assertions
 tests/demo_accounts.sql                  restore → purge → restore on a second fresh database, with real accounts mixed in
+tests/purge_user.sql                     purge_user.sql on a fresh database: one user, a profile-less signup, an unknown username
 tsconfig.json                            lets `npm run typecheck` cover seed.ts
 ```
 
@@ -80,6 +82,7 @@ Demo logins are `<username>@degrees.demo` / `DegreesDemo26!` (e.g. `maya.chen@de
 
 - **Go prod:** run `scripts/purge_demo_users.sql`. It removes every `@degrees.demo` auth user and their profile, tags, embedding, preferences, memberships, messages, feedback, contacts, and connections; groups and meetups they hosted (HACKGT); and groups left with no real member (meetups) or fewer than two (matched). It also cleans up **mentions** (Sep 27): 0012 time proposals/votes by demo accounts; any notification whose payload points at a demo account or a deleted group/event; in surviving groups, demo names in the stored reasoning, group name, plan reasoning, icebreakers, and time notes become "someone" (skipping any name a real account shares), and icebreakers of groups that lost a member are cleared; and their auth audit-log entries, refresh tokens, and flow state. What real people typed (chat, feedback text) is left as written and counted in the notice. Real-to-real edges survive (an edge made at a deleted meetup loses only its `event_id`); a proposed group whose only unanswered member was a demo account confirms (wave-4 rule). Set `v_dry_run := true` at the top to preview counts. **Storage files aren't removed** (deleting `storage.objects` rows from SQL wouldn't delete the files); the notice counts them for the dashboard. Every account made before the Sep 27 email change is also `@degrees.demo` and goes too; only the 60 seeded ones come back.
 - **Back to testing:** run `scripts/restore_demo_users.sql`, then `npm run seed` for real embeddings. It recreates 60 accounts with fixed ids: 0002's 12 (graph, two completed groups with feedback, an always-open HACKGT meetup) plus 48 more (added Sep 27) across GT, Georgia State, Emory, SCAD Atlanta, Agnes Scott, and the AUC in eight friend circles plus 76 seeded-random connections among them (repeatable across re-runs; never touching Maya, 2, 3, or 59–60), 10 of them with an avoid tag, and 2 with no connections yet. Each circle bridges onto someone 2nd-degree from Maya, so her default 2-degree demo is unchanged and her 3-degree slider reaches them. It leaves real accounts alone. It refuses, changing nothing, if a real account has since taken a seeded username or the HACKGT code.
+- **Remove one person:** `scripts/purge_user.sql` — set `v_username` (no @) at the top and run it. Same cleanup as the demo purge, scoped to that account: their rows everywhere, meetups/groups they hosted (for everyone in them), groups left too small, notifications pointing at them, their name redacted to "someone" in surviving groups' stored text. Also finds a signup whose profile row never got created (by `raw_user_meta_data.username`). Errors, changing nothing, if the username doesn't exist. `v_dry_run := true` previews.
 
 ## Seed requirements (from DATA-MODEL.md)
 

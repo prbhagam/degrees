@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Owner: Sahith (Data & Matching) — applies 0001 + 0003-0012 to a throwaway local Postgres and runs matching.sql + privacy.sql,
-# then, on a second fresh database with pgvector in `public` like the shared project, demo_accounts.sql (supabase/scripts/restore + purge_demo_users.sql).
+# then, on fresh databases with pgvector in `public` like the shared project, demo_accounts.sql and purge_user.sql (the supabase/scripts/ files).
 # Never touches the shared Supabase project. Requires Homebrew postgresql + pgvector.
 set -euo pipefail
 
@@ -108,3 +108,12 @@ echo "privacy.sql: all assertions passed"
 setup_db degrees_demo public
 psql_run -f "$here/demo_accounts.sql"
 echo "demo_accounts.sql: all assertions passed"
+
+# purge_user.sql takes its username as a constant; test copies with it filled in.
+for pair in alex:alex.rivera ghost:ghost.user nobody:nobody.here; do
+  sed "s/'CHANGE_ME'/'${pair#*:}'/" "$here/../scripts/purge_user.sql" > "$work/purge_${pair%%:*}.sql"
+done
+setup_db degrees_user public
+psql_run -v purge_alex="$work/purge_alex.sql" -v purge_ghost="$work/purge_ghost.sql" -v purge_nobody="$work/purge_nobody.sql" \
+  -f "$here/purge_user.sql"
+echo "purge_user.sql: all assertions passed"
