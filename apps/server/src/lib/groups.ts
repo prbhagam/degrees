@@ -572,12 +572,14 @@ export async function listTimes(groupId: string, viewerId: string): Promise<Time
       startsAt: new Date(row.starts_at).toISOString(),
       note: row.note ?? null,
       proposedById: row.proposed_by ?? '',
-      proposedByName: (row.proposed_by && names.get(row.proposed_by)) || 'Someone',
+      proposedByName: row.proposed_by ? (names.get(row.proposed_by) ?? 'Someone') : 'The event',
       availableIds,
       availableNames: availableIds.map((id) => names.get(id) ?? 'Someone'),
       imAvailable: availableIds.includes(viewerId),
       // Filled in by the caller, which knows groups.scheduled_at.
       chosen: false,
+      // Only syncEventTime writes a slot with no proposer.
+      fromEvent: row.proposed_by === null,
     };
   });
 }
@@ -598,11 +600,78 @@ export async function timesResponse(groupId: string, viewerId: string): Promise<
   }));
 }
 
+// Added Sep 27: a plan for a real event (a Ticketmaster game or show) has a hard start time, so the group doesn't get
+// to pick one. Runs whenever a plan becomes the current one (generated, or "Use this plan"):
+//   * the plan starts in the future → an event-owned slot (proposed_by null) at that minute, and it becomes the group's
+//     scheduled time (groups + events), replacing whatever was locked in;
+//   * any other event-owned slot is stale (a different event, or a plan with no fixed time) and is removed; if it was
+//     the locked-in time, the group is unscheduled again so members can pick one.
+// Member-proposed times are never touched. Idempotent.
+const toMinute = (iso: string) => {
+  const at = new Date(iso);
+  at.setSeconds(0, 0);
+  return at.toISOString();
+};
+
+export function fixedEventStart(activity: Pick<Activity, 'startsAt'> | null, now = Date.now()): string | null {
+  if (!activity?.startsAt) return null;
+  const at = toMinute(activity.startsAt);
+  return new Date(at).getTime() > now ? at : null;
+}
+
+export async function syncEventTime(groupId: string, activity: Activity | null): Promise<void> {
+  const db = getServiceClient();
+  const startsAt = fixedEventStart(activity);
+  const [slots, group] = await Promise.all([
+    db.from('group_times').select('id, starts_at').eq('group_id', groupId).is('proposed_by', null),
+    db.from('groups').select('scheduled_at').eq('id', groupId).single(),
+  ]);
+  if (slots.error) throw new Error(`group_times read failed: ${slots.error.message}`);
+  if (group.error) throw new Error(`groups read failed: ${group.error.message}`);
+  const scheduledMs = group.data.scheduled_at ? new Date(group.data.scheduled_at as string).getTime() : null;
+  const stale = slots.data.filter((slot) => !startsAt || new Date(slot.starts_at as string).getTime() !== new Date(startsAt).getTime());
+  if (stale.length > 0) {
+    const ids = stale.map((slot) => slot.id as string);
+    const { error: voteError } = await db.from('group_time_votes').delete().in('time_id', ids);
+    if (voteError) throw new Error(`group_time_votes delete failed: ${voteError.message}`);
+    const { error } = await db.from('group_times').delete().in('id', ids);
+    if (error) throw new Error(`group_times delete failed: ${error.message}`);
+  }
+  let scheduledAt: string | null | undefined;
+  if (startsAt) {
+    // A member may already have proposed this exact minute; theirs stands (the unique key is group + minute).
+    const { error } = await db.from('group_times').upsert(
+      { group_id: groupId, proposed_by: null, starts_at: startsAt, note: activity?.title ? `Event start · ${activity.title}` : 'Event start' },
+      { onConflict: 'group_id,starts_at', ignoreDuplicates: true },
+    );
+    if (error) throw new Error(`group_times upsert failed: ${error.message}`);
+    if (scheduledMs !== new Date(startsAt).getTime()) scheduledAt = startsAt;
+  } else if (stale.some((slot) => new Date(slot.starts_at as string).getTime() === scheduledMs)) {
+    scheduledAt = null;
+  }
+  if (scheduledAt === undefined) return;
+  const { error: groupError } = await db.from('groups').update({ scheduled_at: scheduledAt }).eq('id', groupId);
+  if (groupError) throw new Error(`groups update failed: ${groupError.message}`);
+  const { error: eventError } = await db.from('events').update({ scheduled_at: scheduledAt }).eq('group_id', groupId);
+  if (eventError) throw new Error(`events update failed: ${eventError.message}`);
+  log.info('group.event_time_synced', { groupId, scheduledAt });
+}
+
+// While the current plan is a real event, its start time is the group's time: nobody proposes or locks another.
+async function assertNoFixedEventTime(groupId: string): Promise<void> {
+  const current = await loadActivityJob(groupId);
+  const fixed = current?.status === 'ready' ? fixedEventStart(current.activity) : null;
+  if (fixed) {
+    throw new ApiError(409, 'event_time_fixed', "This plan is a real event, so its start time is the group's time.");
+  }
+}
+
 // Idempotent on (group, minute): proposing the same time twice returns the existing slot. The proposer is free
 // for their own suggestion.
 export async function proposeTime(groupId: string, userId: string, startsAt: string, note?: string): Promise<TimeSlot[]> {
   await memberRows(groupId, userId);
   await assertNotArchived(groupId);
+  await assertNoFixedEventTime(groupId);
   const db = getServiceClient();
   const at = new Date(startsAt);
   at.setSeconds(0, 0);
@@ -678,6 +747,7 @@ export async function chooseTime(groupId: string, userId: string, timeId: string
   const members = await memberRows(groupId, userId);
   await assertNotArchived(groupId);
   const row = await timeRow(groupId, timeId);
+  if (row.proposed_by !== null) await assertNoFixedEventTime(groupId);
   const db = getServiceClient();
   const startsAt = new Date(row.starts_at).toISOString();
   const { data: group, error } = await db
@@ -913,6 +983,8 @@ export async function saveActivity(
   if (error) {
     throw new Error(`activities insert failed: ${error.message}`);
   }
+  // A real event's start time becomes the group's time (placeholders never touch the schedule).
+  if (status === 'ready') await syncEventTime(groupId, activity);
 }
 
 export interface ActivityJobRow {
@@ -1019,5 +1091,6 @@ export async function restoreActivity(groupId: string, activityId: string): Prom
   if (!restored) {
     throw new ApiError(404, 'activity_not_found', 'That plan is no longer available.');
   }
+  await syncEventTime(groupId, restored);
   return restored;
 }

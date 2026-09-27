@@ -46,6 +46,7 @@ import {
   renameGroup,
   respondToGroup,
   restoreActivity,
+  fixedEventStart,
   saveActivity,
   saveIcebreakers,
   setActivityGenerating,
@@ -103,6 +104,7 @@ function mockReplaceActivity(next: Activity): void {
     mockActivityHistory = [mockActivity, ...mockActivityHistory];
   }
   mockActivity = mockPlan(next);
+  mockSyncEventTime(mockActivity);
 }
 // wave 5: proposed times for the demo group, in memory.
 let mockTimes: TimeSlot[] = timesFixture();
@@ -110,6 +112,40 @@ let mockTimeSerial = 1;
 let mockScheduledAt: string | null = null;
 function mockTimesView(): TimeSlot[] {
   return mockTimes.map((slot) => ({ ...slot, chosen: mockScheduledAt === slot.startsAt }));
+}
+// Same rule as lib/groups.ts syncEventTime: a real event's start is the group's time; a stale event slot goes.
+function mockSyncEventTime(activity: Activity | null): void {
+  const startsAt = fixedEventStart(activity);
+  const stale = mockTimes.filter((slot) => slot.fromEvent && slot.startsAt !== startsAt);
+  mockTimes = mockTimes.filter((slot) => !stale.includes(slot));
+  if (startsAt) {
+    if (!mockTimes.some((slot) => slot.startsAt === startsAt)) {
+      mockTimeSerial += 1;
+      mockTimes = [
+        ...mockTimes,
+        {
+          id: `mock-time-${mockTimeSerial}`,
+          startsAt,
+          note: activity?.title ? `Event start · ${activity.title}` : 'Event start',
+          proposedById: '',
+          proposedByName: 'The event',
+          availableIds: [],
+          availableNames: [],
+          imAvailable: false,
+          chosen: false,
+          fromEvent: true,
+        },
+      ].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
+    }
+    mockScheduledAt = startsAt;
+  } else if (stale.some((slot) => slot.startsAt === mockScheduledAt)) {
+    mockScheduledAt = null;
+  }
+}
+function assertMockNoFixedEventTime(): void {
+  if (mockActivity?.status !== 'generating' && fixedEventStart(mockActivity)) {
+    throw new ApiError(409, 'event_time_fixed', "This plan is a real event, so its start time is the group's time.");
+  }
 }
 let mockCompletedAt: string | null = null;
 let mockStatus: GroupResponse['status'] = groupFixture.status;
@@ -385,6 +421,7 @@ export const groupRoutes = new Hono<AppEnv>()
     const { startsAt, note } = await validateJson(context, proposeTimeRequestSchema);
     if (env.mockMode) {
       assertMockGroup(groupId);
+      assertMockNoFixedEventTime();
       const at = new Date(startsAt);
       at.setSeconds(0, 0);
       const iso = at.toISOString();
@@ -401,6 +438,7 @@ export const groupRoutes = new Hono<AppEnv>()
           availableNames: [],
           imAvailable: false,
           chosen: false,
+          fromEvent: false,
         };
         mockTimes = [...mockTimes, slot].sort((a, b) => a.startsAt.localeCompare(b.startsAt));
       }
@@ -454,6 +492,7 @@ export const groupRoutes = new Hono<AppEnv>()
       if (!slot) {
         throw new ApiError(404, 'time_not_found', 'That time is no longer proposed.');
       }
+      if (!slot.fromEvent) assertMockNoFixedEventTime();
       mockScheduledAt = slot.startsAt;
       const response = { times: mockTimesView() } satisfies TimesResponse;
       return context.json(response);

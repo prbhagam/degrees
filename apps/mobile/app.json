@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "degrees",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "platforms": [
       "ios",
       "android"
