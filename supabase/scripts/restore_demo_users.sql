@@ -281,7 +281,7 @@ select
         )::text,
         ',' order by dimension
       ) || ']'
-    )::extensions.vector
+    )::vector  -- unqualified: pgvector lives in `public` on the shared project, `extensions` on a fresh one
     from generate_series(1, 768) as dimensions(dimension)
   ),
   now()

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Owner: Sahith (Data & Matching) — applies 0001 + 0003-0012 to a throwaway local Postgres and runs matching.sql + privacy.sql,
-# then, on a second fresh database, demo_accounts.sql (supabase/scripts/restore + purge_demo_users.sql).
+# then, on a second fresh database with pgvector in `public` like the shared project, demo_accounts.sql (supabase/scripts/restore + purge_demo_users.sql).
 # Never touches the shared Supabase project. Requires Homebrew postgresql + pgvector.
 set -euo pipefail
 
@@ -22,8 +22,11 @@ db=degrees
 psql_run() { psql -h "$work" -p "$port" -U postgres -d "$db" -v ON_ERROR_STOP=1 -q "$@"; }
 
 # Creates database $1 with the Supabase shim and every migration except 0002 (the seed), and points psql_run at it.
+# $2 is the schema pgvector goes in: `extensions` (a fresh Supabase project) or `public` (the shared project, where
+# 0001's `create extension vector` landed). Scripts must work with both, so they write the type unqualified.
 setup_db() {
 db="$1"
+vector_schema="${2:-extensions}"
 psql -h "$work" -p "$port" -U postgres -d postgres -q -c "create database $db"
 
 if ! psql_run -tAc "select 1 from pg_available_extensions where name = 'vector'" | grep -q 1; then
@@ -33,7 +36,7 @@ fi
 
 # Supabase shim: roles, auth schema, Realtime publication, and pgvector in `extensions` (as Supabase does).
 # Roles are cluster-wide, so the second database reuses them.
-psql_run -v db="$db" <<'SQL'
+psql_run -v db="$db" -v vector_schema="$vector_schema" <<'SQL'
 do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'anon') then
@@ -58,7 +61,7 @@ create table auth.identities (
 );
 create function auth.uid() returns uuid language sql stable as 'select null::uuid';
 create schema extensions;
-create extension vector schema extensions;
+create extension vector schema :"vector_schema";
 create extension pgcrypto schema extensions;
 grant usage on schema public, extensions to anon, authenticated, service_role;
 alter database :"db" set search_path = "$user", public, extensions;
@@ -102,6 +105,6 @@ echo "matching.sql: all assertions passed"
 psql_run -f "$here/privacy.sql"
 echo "privacy.sql: all assertions passed"
 
-setup_db degrees_demo
+setup_db degrees_demo public
 psql_run -f "$here/demo_accounts.sql"
 echo "demo_accounts.sql: all assertions passed"
