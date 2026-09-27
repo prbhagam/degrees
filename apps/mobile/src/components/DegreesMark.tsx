@@ -177,18 +177,23 @@ export function DegreesMark({
 
   return (
     <View style={{ width: size, height: size }}>
-      {/* Transitional: the old ink d shrinking away toward the park spot. */}
-      <Animated.Image source={dGlyph} resizeMode="contain" style={dShrinkingStyle} />
+      {/* Transitional: the old ink d shrinking away toward the park spot. Animated.View carries the box/opacity
+          (the pattern proven to actually move on screen); the Image inside is a plain, static child. */}
+      <Animated.View style={dShrinkingStyle}>
+        <Image source={dGlyph} resizeMode="contain" style={{ width: '100%', height: '100%' }} />
+      </Animated.View>
       {/* Transitional: the old ember ring swelling toward the d's footprint. */}
-      <Animated.Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={ringGrowingStyle} />
+      <Animated.View style={ringGrowingStyle}>
+        <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ width: '100%', height: '100%' }} />
+      </Animated.View>
       {/* Stable: the new d, ink, fixed at D_POSE, fading in. */}
-      <Animated.Image
-        source={dGlyph}
-        resizeMode="contain"
-        style={[{ position: 'absolute', left: px(D_POSE.left), top: px(D_POSE.top), width: px(D_POSE.width), height: px(D_POSE.height) }, fadeInStyle]}
-      />
+      <Animated.View style={[{ position: 'absolute', left: px(D_POSE.left), top: px(D_POSE.top), width: px(D_POSE.width), height: px(D_POSE.height) }, fadeInStyle]}>
+        <Image source={dGlyph} resizeMode="contain" style={{ width: '100%', height: '100%' }} />
+      </Animated.View>
       {/* Stable: the new ring, ember, parked then sweeping halfway home. */}
-      <Animated.Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={ringOrbitStyle} />
+      <Animated.View style={ringOrbitStyle}>
+        <Image source={ringGlyph} resizeMode="contain" tintColor={EMBER} style={{ width: '100%', height: '100%' }} />
+      </Animated.View>
     </View>
   );
 }
