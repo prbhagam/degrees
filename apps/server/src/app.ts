@@ -6,6 +6,7 @@ import { env } from './config/env.js';
 import { ApiError, errorBody } from './lib/errors.js';
 import { log, requestLogger } from './lib/log.js';
 import { requireAuth, type AppEnv } from './middleware/auth.js';
+import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { connectionRoutes } from './routes/connections.js';
 import { eventRoutes } from './routes/events.js';
@@ -40,6 +41,9 @@ export function createApp(): Hono<AppEnv> {
     const response = { ok: true } satisfies OkResponse;
     return context.json(response);
   });
+
+  // Admin web panel & demo triggers (public for demo access)
+  app.route('/admin', adminRoutes);
 
   // Public routes first: a matched handler that returns ends the chain, so requireAuth below never runs for them.
   app.route('/api', authRoutes);

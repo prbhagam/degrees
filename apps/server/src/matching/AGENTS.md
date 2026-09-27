@@ -12,6 +12,7 @@ The logic that decides who meets whom. **Owner:** Sahith. It lives inside Christ
 | 2. Narrow | `narrow.ts` | RPC `match_narrow` (0003; boost weight from 0004; redefined in 0006 for the 3-way relationship): cosine similarity vs. the requester's embedding, soft cost/travel filters, meet-again boost for `great`, excludes any `not_for_me` pair, `fine` is neutral | Built |
 | 3. Form | `formGroups.ts` | Gemini picks members + reasoning (Flash 4.5s → Lite 3s); output sanitized; deterministic fallback | Built |
 | 4. Plan | `../ai/generateActivity.ts` | Gemini + Maps grounding | Christian's |
+| Batch | `periodicMatch.ts` | Automated batch matching across all profiles (1-3 groups per user, 1st-degree gate) | Built |
 
 `routes/match.ts` runs traverse → narrow → formGroups in real mode and persists the group with RPC `match_create_group` (one transaction). Mock mode still returns `matchFixture`. Since Sep 26 (PR #14) the response **redacts members past 1st degree** (`id`, `displayName`, `bio`, `photoUrl` all null, `revealed: false`) and adds `unrevealedCount`; `GET /api/groups/:id` applies the same rule until the group is confirmed. Candidates still carry `path` (user ids requester → candidate) internally, but it must never reach the client.
 
