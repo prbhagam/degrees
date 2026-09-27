@@ -10,7 +10,7 @@
 // bell has breathing room from the screen edge.
 import type { HangoutSummary } from '@degrees/shared';
 import { format, parseISO } from 'date-fns';
-import { Link, Stack, useRouter, type Href } from 'expo-router';
+import { Stack, useRouter, type Href } from 'expo-router';
 import { AlertCircle, Bell, CalendarPlus, ChevronDown, ChevronRight, Plus, QrCode, Users } from 'lucide-react-native';
 import { DegreesMark } from '@/components/DegreesMark';
 import { usePullToRefresh } from '@/lib/query';
@@ -144,16 +144,6 @@ function ProfileNag({ status }: { status: { interests: boolean; about: boolean; 
   );
 }
 
-// Charles's screens plus the new Sep 26 additions, reachable until real nav entry points exist for all of them.
-const DEV_LINKS: { href: Href; label: string }[] = [
-  { href: '/onboarding/interests', label: 'Onboarding: interests' },
-  { href: '/onboarding/about', label: 'Onboarding: about you' },
-  { href: '/onboarding/preferences', label: 'Onboarding: preferences' },
-  { href: '/profile/edit', label: 'Edit profile' },
-  { href: '/notifications', label: 'Notifications' },
-  { href: '/create-event', label: 'Host a meetup' },
-];
-
 export function HomeScreen() {
   const router = useRouter();
   const hangouts = useHangouts();
@@ -269,17 +259,6 @@ export function HomeScreen() {
           {showPast
             ? past.map((hangout) => <HangoutRow key={hangout.id} hangout={hangout} onPress={() => open(hangout)} />)
             : null}
-        </View>
-      ) : null}
-
-      {__DEV__ ? (
-        <View className="gap-2 pt-4">
-          <Heading>Developer</Heading>
-          {DEV_LINKS.map(({ href, label }) => (
-            <Link key={label} href={href} className="font-body text-base text-ember-ink">
-              {label}
-            </Link>
-          ))}
         </View>
       ) : null}
     </Screen>
