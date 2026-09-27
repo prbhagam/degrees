@@ -794,14 +794,15 @@ export async function activityInput(
       .select('cost_max_cents, max_travel_mi')
       .in('user_id', ids),
     tagsByUser(ids),
-    // Wave 3: the venues already suggested for this group, so a regenerate doesn't hand back the same plan.
+    // Wave 3: the plans already suggested for this group, so a regenerate doesn't hand back the same plan.
+    // Wave 6 follow-up: titles too (they go into the prompt as whole plans), and up to 20, newest (= current) first.
     db
       .from('activities')
-      .select('venue')
+      .select('title, venue')
       .eq('group_id', groupId)
       .eq('status', 'ready')
       .order('created_at', { ascending: false })
-      .limit(12),
+      .limit(20),
   ]);
   if (profiles.error) {
     throw new Error(`profiles read failed: ${profiles.error.message}`);
@@ -819,6 +820,15 @@ export async function activityInput(
         .filter((venue) => venue.length > 0),
     ),
   ];
+  const seenPlans = new Set<string>();
+  const previousPlans = previous.data.flatMap((row) => {
+    const title = (row.title as string | null)?.trim() ?? '';
+    const venue = (row.venue as string | null)?.trim() ?? '';
+    const key = `${title.toLowerCase()}|${venue.toLowerCase()}`;
+    if ((!title && !venue) || seenPlans.has(key)) return [];
+    seenPlans.add(key);
+    return [{ title, venue }];
+  });
 
   const located = profiles.data.filter(
     (row) => typeof row.lat === 'number' && typeof row.lng === 'number',
@@ -862,6 +872,7 @@ export async function activityInput(
           : DEFAULT_CENTER.lng,
     },
     previousVenues,
+    previousPlans,
   };
 }
 

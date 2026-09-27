@@ -439,6 +439,9 @@ export interface GenerateActivityInput {
   };
   // Added Sep 26 (wave 3): venues from earlier plans for this group, so "Suggest something else" is something else.
   previousVenues: string[];
+  // Added Sep 27 (wave 6 follow-up): every plan this group has already been given, the current one first, so the
+  // prompt can show the model the plans themselves (not just venue names) and require something different.
+  previousPlans: { title: string; venue: string }[];
 }
 
 export type AnalyzeFeedbackOutput = z.infer<typeof analyzeFeedbackOutputSchema>;

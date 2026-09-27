@@ -145,6 +145,7 @@ Expo ships breaking changes every SDK release. APIs you remember are likely rena
 - **401s**: `api.ts` refreshes the session once on a server 401 and retries; a rejected refresh signs out locally (the auth listener clears caches, the gate goes to /login). Network errors never sign anyone out.
 - **Circle map**: seats come from `features/circle/layout.ts` (`clusterOrder` + `homeSpots`, plain TS — checkable with tsx). Mutual edges are drawn only; contacts are the only forces besides the home springs, so an untouched map has zero net force.
 - Query cache buster is `wave6`.
+- **Header spacing** (follow-up): the tab layout pads both sides of every tab header by `HEADER_EDGE` (20pt) + the safe-area inset; header icons are `HeaderIconButton` (44pt box, 22pt glyph) and the layout subtracts the box's slack, so the glyph sits exactly on the inset on every iPhone. Don't add padding inside `headerLeft`/`headerRight`.
 
 ## Known gaps (Sep 26, after wave 3)
 

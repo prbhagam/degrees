@@ -85,6 +85,7 @@ const mockActivityInput = {
     lng: -84.3963,
   },
   previousVenues: [],
+  previousPlans: [],
 } satisfies GenerateActivityInput;
 
 // Mock mode keeps the latest generated plan in memory so GET reflects POST. Wave 3: earlier plans are kept too.
